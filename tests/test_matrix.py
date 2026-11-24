@@ -16,7 +16,7 @@ from prioritykit.matrix import RANK, SCORES
 
 def stated(i: int, u: int) -> str:
     """The default rules exactly as the background post states them."""
-    if i >= 4 and u >= 4:
+    if i >= 4 and u == 5:
         return "P0"
     if i >= 4:
         return "P1"
@@ -33,7 +33,7 @@ def test_default_matches_stated_rules() -> None:
 
 
 def test_default_counts() -> None:
-    assert default_matrix().counts() == {"P0": 4, "P1": 8, "P2": 7, "drop": 6}
+    assert default_matrix().counts() == {"P0": 2, "P1": 10, "P2": 7, "drop": 6}
 
 
 def test_default_passes_check_with_no_warnings() -> None:

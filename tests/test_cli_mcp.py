@@ -24,7 +24,7 @@ def test_cli_classify_text_and_json(capsys: pytest.CaptureFixture[str]) -> None:
 
 def test_cli_matrix_and_anchors(capsys: pytest.CaptureFixture[str]) -> None:
     code, out = run(capsys, "matrix")
-    assert code == 0 and "cells: 4 P0, 8 P1, 7 P2, 6 drop" in out
+    assert code == 0 and "cells: 2 P0, 10 P1, 7 P2, 6 drop" in out
     code, out = run(capsys, "anchors")
     assert code == 0 and "Waiting a quarter costs nothing" in out
 
@@ -63,9 +63,10 @@ def test_cli_errors_exit_2(capsys: pytest.CaptureFixture[str]) -> None:
 
 
 def test_tool_functions() -> None:
-    assert srv.tool_classify_task(4, 4, "Outage")["level"] == "P0"
+    assert srv.tool_classify_task(4, 5, "Outage")["level"] == "P0"
+    assert srv.tool_classify_task(4, 4)["level"] == "P1"
     rubric = srv.tool_get_rubric()
-    assert rubric["counts"] == {"P0": 4, "P1": 8, "P2": 7, "drop": 6}
+    assert rubric["counts"] == {"P0": 2, "P1": 10, "P2": 7, "drop": 6}
     goals = [
         srv.GoalIn(id="a", title="A", horizon="annual"),
         srv.GoalIn(id="q", title="Q", horizon="quarterly", parent="a"),

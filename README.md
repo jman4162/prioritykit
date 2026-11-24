@@ -39,22 +39,24 @@ The default table gives importance precedence over urgency:
 
 ```text
 importance \ urgency    1     2     3     4     5
-                    5     P1    P1    P1    P0    P0
-                    4     P1    P1    P1    P0    P0
+                    5     P1    P1    P1    P1    P0
+                    4     P1    P1    P1    P1    P0
                     3     P2    P2    P2    P1    P1
                     2   drop  drop  drop    P2    P2
                     1   drop  drop  drop    P2    P2
-cells: 4 P0, 8 P1, 7 P2, 6 drop
+cells: 2 P0, 10 P1, 7 P2, 6 drop
 ```
 
 | Level | Action |
 | --- | --- |
 | P0, interrupt | Rewrite today's three goals around it, and name the goal it displaces. |
 | P1, schedule | Give it a slot in one of the next few days' three goals. |
-| P2, list | Put it on the P2 list and plan as if it will not happen. The periodic review promotes it to P1 or deletes it. |
+| P2, list | Put it on the P2 list and plan as if it will not happen. The weekly review promotes it to P1 or deletes it. |
 | drop | Decline it or delete it now. |
 
-Urgency alone never lifts work of importance 1 or 2 above P2. Multiplying the two scores, as a
+P0 needs importance of at least 4 and urgency 5, so work that grows costly within days waits for
+the next morning's plan instead of interrupting today. Urgency alone never lifts work of importance
+1 or 2 above P2. Multiplying the two scores, as a
 risk matrix does, would rank a very important task with no deadline (5 × 1 = 5) below an
 unimportant urgent one (2 × 5 = 10).
 

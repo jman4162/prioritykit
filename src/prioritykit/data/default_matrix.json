@@ -55,7 +55,7 @@
     },
     "P2": {
       "name": "list",
-      "action": "Put it on the P2 list and plan as if it will not happen. The periodic review promotes it to P1 or deletes it."
+      "action": "Put it on the P2 list and plan as if it will not happen. The weekly review promotes it to P1 or deletes it."
     },
     "drop": {
       "name": "drop",
@@ -88,14 +88,14 @@
       "P1",
       "P1",
       "P1",
-      "P0",
+      "P1",
       "P0"
     ],
     [
       "P1",
       "P1",
       "P1",
-      "P0",
+      "P1",
       "P0"
     ]
   ]

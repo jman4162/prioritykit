@@ -30,9 +30,17 @@ it displaces, call `replan_for_p0`, and show the revised plan.
 
 1. Read the goal tree (from `priorities.toml` with `check_workspace`, or from the person).
 2. Propose exactly three goals for the day. Each one names the quarterly goal it advances.
-   Prefer outcomes ("45-minute strength session") to activities ("work on fitness").
+   Word each so the person can tell at night whether it happened ("45-minute strength session"
+   rather than "work on fitness").
 3. Call `check_day_plan` and fix every error before you present the plan.
 4. Mention annual goals with no slot today only if one has gone without a slot all week.
+
+## Small, piled-up, and fun work
+
+- A task that takes a few minutes: suggest doing it when it arrives instead of scoring and listing it.
+- Many small items of one kind (small fixes, house maintenance): at review, score the pile as one
+  item, since together they can reach P1 when none does alone.
+- Reading, play, and side projects done for enjoyment sit outside the three goals and need no goal.
 
 ## P2 and the review
 
