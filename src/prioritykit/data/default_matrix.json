@@ -1,0 +1,102 @@
+{
+  "description": "Default importance-first lookup from 1-5 importance and urgency scores to P0, P1, P2, or drop, as described in https://john-hodge.com/blog/why-p2-work-rarely-gets-done/. grid[i - 1][u - 1] is the level for importance i and urgency u. Copy this file and pass it with --matrix to use your own anchors or cells.",
+  "importance": [
+    {
+      "score": 1,
+      "label": "No effect on any goal"
+    },
+    {
+      "score": 2,
+      "label": "Small benefit; no goal moves"
+    },
+    {
+      "score": 3,
+      "label": "Supports a goal indirectly, or meets an obligation with moderate consequences"
+    },
+    {
+      "score": 4,
+      "label": "Directly advances a quarterly goal"
+    },
+    {
+      "score": 5,
+      "label": "Directly advances an annual goal, or prevents serious harm to health, family, or a commitment others depend on"
+    }
+  ],
+  "urgency": [
+    {
+      "score": 1,
+      "label": "Waiting a quarter costs nothing"
+    },
+    {
+      "score": 2,
+      "label": "Waiting a month costs little"
+    },
+    {
+      "score": 3,
+      "label": "Cost rises within weeks"
+    },
+    {
+      "score": 4,
+      "label": "Cost rises within days; this week"
+    },
+    {
+      "score": 5,
+      "label": "Cost rises within hours; start today"
+    }
+  ],
+  "levels": {
+    "P0": {
+      "name": "interrupt",
+      "action": "Rewrite today's three goals around it, and name the goal it displaces."
+    },
+    "P1": {
+      "name": "schedule",
+      "action": "Give it a slot in one of the next few days' three goals, or do it around today's three if it cannot wait."
+    },
+    "P2": {
+      "name": "list",
+      "action": "Put it on the P2 list and plan as if it will not happen. The periodic review promotes it to P1 or deletes it."
+    },
+    "drop": {
+      "name": "drop",
+      "action": "Decline it or delete it now."
+    }
+  },
+  "grid": [
+    [
+      "drop",
+      "drop",
+      "drop",
+      "P2",
+      "P2"
+    ],
+    [
+      "drop",
+      "drop",
+      "drop",
+      "P2",
+      "P2"
+    ],
+    [
+      "P2",
+      "P2",
+      "P2",
+      "P1",
+      "P1"
+    ],
+    [
+      "P1",
+      "P1",
+      "P1",
+      "P0",
+      "P0"
+    ],
+    [
+      "P1",
+      "P1",
+      "P1",
+      "P0",
+      "P0"
+    ]
+  ]
+}

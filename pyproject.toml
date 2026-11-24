@@ -1,0 +1,82 @@
+[build-system]
+requires = ["hatchling>=1.27,<1.32"]
+build-backend = "hatchling.build"
+
+[project]
+name = "prioritykit"
+version = "0.1.0"
+description = "Deterministic rules for importance-urgency scoring, P0/P1/P2 levels, and three daily goals, for people and AI agents"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "John Hodge" }]
+keywords = [
+  "prioritization",
+  "eisenhower-matrix",
+  "productivity",
+  "mcp",
+  "ai-agents",
+  "goal-setting",
+  "planning",
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Intended Audience :: End Users/Desktop",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Office/Business :: Scheduling",
+  "Typing :: Typed",
+]
+# The core library and CLI use only the standard library.
+dependencies = []
+
+[project.optional-dependencies]
+# MCP SDK 1.x exposes FastMCP and 2.x exposes MCPServer; mcp_server.py accepts either.
+mcp = ["mcp>=1.26,<3"]
+
+[project.urls]
+Homepage = "https://github.com/jman4162/prioritykit"
+Issues = "https://github.com/jman4162/prioritykit/issues"
+"Background post" = "https://john-hodge.com/blog/why-p2-work-rarely-gets-done/"
+
+[project.scripts]
+prioritykit = "prioritykit.cli:main"
+prioritykit-mcp = "prioritykit.mcp_server:main"
+
+[dependency-groups]
+dev = ["pytest>=8", "ruff>=0.6", "mypy>=1.13", "mcp>=1.26,<3"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/prioritykit"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/prioritykit", "tests", "examples", "skills", "README.md", "LICENSE", "CHANGELOG.md"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["src/prioritykit"]
+
+[[tool.mypy.overrides]]
+module = ["mcp", "mcp.*"]
+ignore_missing_imports = true
+
+# The MCP SDK's tool decorator is untyped in both generations.
+[[tool.mypy.overrides]]
+module = ["prioritykit.mcp_server"]
+disallow_untyped_decorators = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

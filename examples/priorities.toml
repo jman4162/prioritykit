@@ -1,0 +1,74 @@
+# Example priorities file for `prioritykit check examples/priorities.toml`.
+# Labels are illustrative. Keep your own copy under version control; prioritykit only reads it.
+
+[[goal]]
+id = "lead"
+title = "Grow as a technical lead"
+horizon = "annual"
+
+[[goal]]
+id = "family"
+title = "Be present with my family"
+horizon = "annual"
+
+[[goal]]
+id = "fit"
+title = "Stay strong and fit"
+horizon = "annual"
+
+[[goal]]
+id = "writing"
+title = "Publish technical writing"
+horizon = "annual"
+
+[[goal]]
+id = "mentor"
+title = "Mentor a junior scientist"
+horizon = "quarterly"
+parent = "lead"
+
+[[goal]]
+id = "evenings"
+title = "Protect weekday evenings"
+horizon = "quarterly"
+parent = "family"
+
+[[goal]]
+id = "strength"
+title = "Strength train 3 times a week"
+horizon = "quarterly"
+parent = "fit"
+
+[[goal]]
+id = "monthly-post"
+title = "One post a month"
+horizon = "quarterly"
+parent = "writing"
+
+# Exactly three goals, each pointing at a quarterly goal. A P0 entry replaces one of them:
+#   { title = "Restore the build server", p0 = true, displaces = "Review a design doc with a teammate" }
+[today]
+date = 2026-11-24
+goals = [
+  { title = "Review a design doc with a teammate", parent = "mentor" },
+  { title = "Dinner and bedtime, phone in another room", parent = "evenings" },
+  { title = "45-minute strength session", parent = "strength" },
+]
+
+# The P2 list. Scores are optional; rescored items that now map to P1 or P0 are promotion
+# candidates, and old items that still score low are deletion candidates.
+[[p2]]
+title = "Reorganize the photo library"
+added = 2026-05-02
+importance = 2
+urgency = 1
+
+[[p2]]
+title = "Renew the passport before the spring trip"
+added = 2026-10-01
+importance = 4
+urgency = 3
+
+[[p2]]
+title = "Try a new note-taking app"
+added = 2026-11-10
