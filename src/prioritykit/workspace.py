@@ -1,7 +1,7 @@
 """Read a plain-text priorities file (TOML).
 
-prioritykit stores nothing. A person or an agent keeps goals, today's plan, and the P2 list in
-one TOML file under their own version control, and the CLI or MCP server checks it. See
+A person or an agent keeps goals, today's plan, and the P2 list in one TOML file under their own
+version control, and the CLI or MCP server reads and checks it. See
 ``examples/priorities.toml`` for the format.
 """
 

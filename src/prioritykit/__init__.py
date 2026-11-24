@@ -1,7 +1,8 @@
 """prioritykit: importance-urgency scoring, P0/P1/P2 levels, and three daily goals.
 
-Pure, deterministic functions with no storage. People call them from the CLI, and AI agents
-call them through the MCP server, so the rules are applied the same way in both places.
+Pure, deterministic functions that compute each result from their arguments. People call them
+from the CLI, and AI agents call them through the MCP server, so the rules are applied the same
+way in both places.
 """
 
 from importlib.metadata import PackageNotFoundError, version

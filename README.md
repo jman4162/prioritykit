@@ -6,10 +6,10 @@ AI agent acting as a chief of staff. You rate each task from 1 to 5 on importanc
 trace to quarterly and annual goals. The background, the evidence, and the figures are in
 [Why P2 work rarely gets done, and how I pick three goals a day](https://john-hodge.com/blog/why-p2-work-rarely-gets-done/).
 
-The package stores nothing. The core library and the command line interface (CLI) use only the
-Python standard library, and an optional Model Context Protocol (MCP) server exposes the same
-functions to agents. Your goals, today's plan, and your P2 list live in a plain TOML file that
-you keep under your own version control.
+Each function computes its result from its arguments, and your goals, today's plan, and P2 list
+live in a plain TOML file that you keep under your own version control. The core library and the
+command line interface (CLI) use only the Python standard library, and an optional Model Context
+Protocol (MCP) server exposes the same functions to agents.
 
 ## Install
 

@@ -1,8 +1,8 @@
 """stdio MCP server for AI agents acting as a chief of staff.
 
 Every tool is a pure function of its inputs (plus, for ``check_workspace``, one local file the
-agent names). Nothing is stored. The human decides scores and commits the plan; the agent
-proposes, and these tools apply the rules so the arithmetic is the same every time.
+agent names), so state lives with the caller. The human decides scores and commits the plan, the
+agent proposes, and these tools apply the rules so the arithmetic is the same every time.
 
 Set ``PRIORITYKIT_MATRIX`` to a JSON file to replace the default anchors and cells.
 """
