@@ -1,5 +1,10 @@
 # prioritykit
 
+[![CI](https://github.com/jman4162/prioritykit/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/jman4162/prioritykit/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/prioritykit)](https://pypi.org/project/prioritykit/)
+[![Python versions](https://img.shields.io/pypi/pyversions/prioritykit)](https://pypi.org/project/prioritykit/)
+[![License](https://img.shields.io/github/license/jman4162/prioritykit)](https://github.com/jman4162/prioritykit/blob/main/LICENSE)
+
 prioritykit applies one prioritization system the same way for a person at a terminal and for an
 AI agent acting as a chief of staff. You rate each task from 1 to 5 on importance and urgency, a
 5 × 5 table maps the pair to P0, P1, P2, or drop, and each day holds exactly three goals that
@@ -16,12 +21,12 @@ Protocol (MCP) server exposes the same functions to agents.
 Python 3.11 or later.
 
 ```bash
-uv tool install "prioritykit[mcp] @ git+https://github.com/jman4162/prioritykit"
+uv tool install "prioritykit[mcp]"
 # or
-pip install "prioritykit[mcp] @ git+https://github.com/jman4162/prioritykit"
+pip install "prioritykit[mcp]"
 ```
 
-Drop `[mcp]` if you only want the CLI and library. A PyPI release will follow.
+Drop `[mcp]` if you only want the CLI and library.
 
 ## The rules
 
@@ -114,7 +119,7 @@ importance = 2   # optional; rescored items that now map to P1 or P0 are promoti
 urgency = 1
 ```
 
-[`examples/priorities.toml`](examples/priorities.toml) is a complete file. A P2 item older than
+[`examples/priorities.toml`](https://github.com/jman4162/prioritykit/blob/main/examples/priorities.toml) is a complete file. A P2 item older than
 90 days that still scores P2 or lower, or was never scored, is a deletion candidate; change the
 threshold with `--max-age`.
 
@@ -148,7 +153,7 @@ The server's instructions tell the agent to propose scores with a reason for eac
 the human to confirm, never to label work P0 on its own, to call `check_day_plan` before
 presenting a day's three goals, and to raise P2 items only during a review. Work the agent
 generates for itself is scored like any other task. The same protocol is written out as an agent
-skill in [`skills/prioritykit/SKILL.md`](skills/prioritykit/SKILL.md); copy it into
+skill in [`skills/prioritykit/SKILL.md`](https://github.com/jman4162/prioritykit/blob/main/skills/prioritykit/SKILL.md); copy it into
 `~/.claude/skills/` or adapt it for an `AGENTS.md` file.
 
 `check_workspace` reads the file path the agent passes. The server runs locally with your
@@ -156,7 +161,7 @@ permissions, so scope the agent's file access as you would for any local tool.
 
 ## Your own table
 
-Copy [`src/prioritykit/data/default_matrix.json`](src/prioritykit/data/default_matrix.json),
+Copy [`src/prioritykit/data/default_matrix.json`](https://github.com/jman4162/prioritykit/blob/main/src/prioritykit/data/default_matrix.json),
 change the anchors or cells, and pass it with `--matrix`, or set `PRIORITYKIT_MATRIX` for the MCP
 server. `prioritykit validate-matrix` rejects a table in which raising a score lowers the level,
 and warns when urgency alone lifts low-importance work above P2, when P0 cells fall outside the

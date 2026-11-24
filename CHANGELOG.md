@@ -1,6 +1,8 @@
 # Changelog
 
-## 0.2.0 (unreleased)
+## 0.2.0 (2026-11-24)
+
+First release on PyPI.
 
 - Default table: P0 now needs importance of at least 4 and urgency 5 (2 cells, down from 4), so
   work that grows costly within days goes into the next day's plan as P1 instead of interrupting
@@ -8,7 +10,7 @@
 - The default P2 action names a weekly review.
 - The agent skill covers tasks of a few minutes, piles of small items, and work done for enjoyment.
 
-## 0.1.0 (unreleased)
+## 0.1.0 (GitHub only)
 
 - Default 5 x 5 importance-urgency table with anchors and level actions; `classify` and
   `check_matrix` for custom tables.
