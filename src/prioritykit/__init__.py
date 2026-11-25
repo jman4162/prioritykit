@@ -24,7 +24,14 @@ from .matrix import (
 )
 from .plan import DailyGoal, Goal, PlanReport, check_day_plan, check_goal_tree, replan_for_p0
 from .review import P2Item, ReviewReport, littles_law_wait, review_p2
-from .workspace import Workspace, WorkspaceError, load_workspace, workspace_from_dict
+from .workspace import (
+    Workspace,
+    WorkspaceError,
+    WorkspaceReport,
+    check_workspace,
+    load_workspace,
+    workspace_from_dict,
+)
 
 try:
     __version__ = version("prioritykit")
@@ -47,10 +54,12 @@ __all__ = [
     "ReviewReport",
     "Workspace",
     "WorkspaceError",
+    "WorkspaceReport",
     "__version__",
     "check_day_plan",
     "check_goal_tree",
     "check_matrix",
+    "check_workspace",
     "classify",
     "default_matrix",
     "littles_law_wait",

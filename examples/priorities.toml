@@ -1,5 +1,5 @@
 # Example priorities file for `prioritykit check examples/priorities.toml`.
-# Labels are illustrative. Keep your own copy under version control; prioritykit only reads it.
+# Labels are illustrative. Keep your own copy in a private repository; prioritykit only reads it.
 
 [[goal]]
 id = "lead"

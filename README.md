@@ -71,14 +71,18 @@ unimportant urgent one (2 × 5 = 10).
 prioritykit classify -i 5 -u 2          # Importance 5, urgency 2: P1 (schedule). ...
 prioritykit matrix                      # the 5 x 5 grid
 prioritykit anchors                     # anchors and level actions
-prioritykit check examples/priorities.toml --departures 3
+prioritykit check examples/priorities.toml --today 2026-11-24 --departures 3
 prioritykit validate-matrix my-matrix.json
 ```
 
 Every command takes `--json`. `check` exits with status 1 when the goal tree or today's plan
-breaks a rule, so it can run in a pre-commit hook or a scheduled job. Output for the example:
+breaks a rule, so it can run in a pre-commit hook or a scheduled job. It counts P2 ages from the
+run date, which is the current date unless you pass `--today`, and warns when `[today]` is dated
+before the run date; `--strict` exits 1 on warnings too. `python -m prioritykit` runs the same CLI
+when the console script is not on your PATH. Output for the example:
 
 ```text
+goal tree: ok (4 annual, 4 quarterly)
 today (3 goals): ok
   Review a design doc with a teammate <- Mentor a junior scientist <- Grow as a technical lead
   Dinner and bedtime, phone in another room <- Protect weekday evenings <- Be present with my family
@@ -123,6 +127,9 @@ urgency = 1
 90 days that still scores P2 or lower, or was never scored, is a deletion candidate; change the
 threshold with `--max-age`.
 
+Goal titles can name employer-internal projects or private matters, so keep your priorities file
+in a private repository, not a public one.
+
 ## MCP server for agents
 
 The server speaks stdio and exposes seven tools, all of them pure functions:
@@ -135,7 +142,7 @@ The server speaks stdio and exposes seven tools, all of them pure functions:
 | `replan_for_p0` | today's plan with one goal replaced by a confirmed P0, rechecked |
 | `review_p2` | promote, delete, and keep lists for a P2 review |
 | `wait_estimate` | expected months on a list, by Little's law |
-| `check_workspace` | all of the above for a local `priorities.toml` |
+| `check_workspace` | all of the above for a local `priorities.toml`, plus warnings such as a stale `[today]` date |
 
 Claude Code:
 
@@ -156,14 +163,23 @@ generates for itself is scored like any other task. The same protocol is written
 skill in [`skills/prioritykit/SKILL.md`](https://github.com/jman4162/prioritykit/blob/main/skills/prioritykit/SKILL.md); copy it into
 `~/.claude/skills/` or adapt it for an `AGENTS.md` file.
 
-`check_workspace` reads the file path the agent passes. The server runs locally with your
-permissions, so scope the agent's file access as you would for any local tool.
+`check_workspace` is the only tool that reads a file. It runs with your permissions and reads
+only paths that end in `.toml` once symlinks are resolved. For an agent that also reads untrusted
+content such as email, where a prompt injection could choose the path, narrow it further:
+
+- `PRIORITYKIT_ROOT=/path/to/dir` refuses files outside that directory.
+- `PRIORITYKIT_TOOLS=pure` leaves `check_workspace` out, so no tool reads a file. A script reads
+  the file and passes the goal tree and plan to the other tools.
 
 ## Your own table
 
-Copy [`src/prioritykit/data/default_matrix.json`](https://github.com/jman4162/prioritykit/blob/main/src/prioritykit/data/default_matrix.json),
-change the anchors or cells, and pass it with `--matrix`, or set `PRIORITYKIT_MATRIX` for the MCP
-server. `prioritykit validate-matrix` rejects a table in which raising a score lowers the level,
+Start from `prioritykit matrix --json > my-matrix.json` or a copy of
+[`src/prioritykit/data/default_matrix.json`](https://github.com/jman4162/prioritykit/blob/main/src/prioritykit/data/default_matrix.json),
+change the anchors, cells, or level names and actions, and pass it with `--matrix`. Set
+`PRIORITYKIT_MATRIX` to use it everywhere: the CLI reads it when `--matrix` is absent and the MCP
+server always reads it, so a script and an agent classify with the same table. The four levels
+(P0, P1, P2, drop) are fixed, because the agent instructions and the P2 review depend on what each
+one means, and the MCP server has no tool that changes the table. `prioritykit validate-matrix` rejects a table in which raising a score lowers the level,
 and warns when urgency alone lifts low-importance work above P2, when P0 cells fall outside the
 top-right corner, or when more than 4 cells are P0.
 

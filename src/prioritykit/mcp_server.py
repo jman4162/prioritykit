@@ -4,23 +4,35 @@ Every tool is a pure function of its inputs (plus, for ``check_workspace``, one 
 agent names), so state lives with the caller. The human decides scores and commits the plan, the
 agent proposes, and these tools apply the rules so the arithmetic is the same every time.
 
-Set ``PRIORITYKIT_MATRIX`` to a JSON file to replace the default anchors and cells.
+Environment variables:
+
+- ``PRIORITYKIT_MATRIX``: a JSON file that replaces the default anchors and cells.
+- ``PRIORITYKIT_ROOT``: a directory; ``check_workspace`` refuses files outside it.
+- ``PRIORITYKIT_TOOLS``: ``all`` (the default) or ``pure``, which leaves out
+  ``check_workspace`` so no tool reads a file. Use ``pure`` for an agent that also reads
+  untrusted content such as email.
 """
 
 from __future__ import annotations
 
 import importlib
+import inspect
 import os
 from datetime import date
+from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, Field
 
+from . import __version__
 from . import plan as plan_mod
 from .matrix import Matrix, check_matrix, classify, default_matrix, load_matrix
 from .review import DEFAULT_MAX_AGE_DAYS, P2Item, littles_law_wait
 from .review import review_p2 as review_p2_fn
+from .workspace import check_workspace as check_workspace_fn
 from .workspace import load_workspace
+
+TOOL_SETS = ("all", "pure")
 
 INSTRUCTIONS = """prioritykit applies a prioritization system. You propose, and the human decides.
 
@@ -36,6 +48,8 @@ INSTRUCTIONS = """prioritykit applies a prioritization system. You propose, and 
 5. Score work you generate yourself (research leads, refactors, ideas) like any other task; if it
    advances no goal, the rules put it at P2 or drop.
 6. Quote numbers from tool results. Do not invent counts, dates, or waits.
+7. If check_workspace returns warnings, such as a [today] date before the run date, tell the
+   human before you rely on the plan.
 """
 
 
@@ -145,15 +159,29 @@ def tool_wait_estimate(backlog: int, departures_per_month: float) -> dict[str, A
     }
 
 
+def _workspace_path(path: str) -> Path:
+    """Resolve symlinks, then allow only .toml files, inside PRIORITYKIT_ROOT when it is set."""
+    resolved = Path(path).expanduser().resolve()
+    if resolved.suffix != ".toml":
+        raise ValueError(f"check_workspace reads only .toml files; {path!r} is not one")
+    root = os.environ.get("PRIORITYKIT_ROOT")
+    if root and not resolved.is_relative_to(Path(root).expanduser().resolve()):
+        raise ValueError(f"{path!r} is outside PRIORITYKIT_ROOT")
+    return resolved
+
+
 def tool_check_workspace(path: str, today: str | None = None) -> dict[str, Any]:
-    ws = load_workspace(path)
-    on = date.fromisoformat(today) if today else (ws.today_date or date.today())
-    out: dict[str, Any] = {"goal_tree_errors": plan_mod.check_goal_tree(ws.goals)}
-    if ws.today is not None:
-        out["today"] = plan_mod.check_day_plan(ws.today, ws.goals).to_dict()
-    if ws.p2:
-        out["p2_review"] = review_p2_fn(ws.p2, on, matrix=_matrix()).to_dict()
-    return out
+    ws = load_workspace(_workspace_path(path))
+    run_date = date.fromisoformat(today) if today else date.today()
+    return check_workspace_fn(ws, run_date, matrix=_matrix()).to_dict()
+
+
+def _tool_set() -> str:
+    value = os.environ.get("PRIORITYKIT_TOOLS", "all").strip().lower()
+    if value not in TOOL_SETS:
+        # Fail at startup rather than fall back to a set that reads files.
+        raise ValueError(f"PRIORITYKIT_TOOLS must be one of {', '.join(TOOL_SETS)}, got {value!r}")
+    return value
 
 
 def _server_class() -> Any:
@@ -167,7 +195,17 @@ def _server_class() -> Any:
 
 
 def build_server() -> Any:
-    server = _server_class()("prioritykit", instructions=INSTRUCTIONS)
+    tool_set = _tool_set()
+    cls = _server_class()
+    kwargs: dict[str, Any] = {"instructions": INSTRUCTIONS}
+    # MCPServer (2.x) takes a version and defaults it to "". FastMCP (1.x) takes none, so set
+    # it on the low-level server it wraps.
+    if "version" in inspect.signature(cls).parameters:
+        kwargs["version"] = __version__
+    server = cls("prioritykit", **kwargs)
+    lowlevel = getattr(server, "_mcp_server", None)
+    if "version" not in kwargs and lowlevel is not None and hasattr(lowlevel, "version"):
+        lowlevel.version = __version__
 
     @server.tool()
     def get_rubric() -> dict[str, Any]:
@@ -208,10 +246,16 @@ def build_server() -> Any:
         """Expected months a new item waits on a list, by Little's law."""
         return tool_wait_estimate(backlog, departures_per_month)
 
-    @server.tool()
-    def check_workspace(path: str, today: str | None = None) -> dict[str, Any]:
-        """Check a local priorities.toml file: goal tree, today's plan, and P2 review."""
-        return tool_check_workspace(path, today)
+    if tool_set == "all":
+
+        @server.tool()
+        def check_workspace(path: str, today: str | None = None) -> dict[str, Any]:
+            """Check a local priorities .toml file: goal tree, today's plan, P2 review, warnings.
+
+            `today` is the run date (default: the current date). Only .toml files are read,
+            and only inside PRIORITYKIT_ROOT when the server sets it.
+            """
+            return tool_check_workspace(path, today)
 
     return server
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from collections.abc import Sequence
 from datetime import date
@@ -19,13 +20,15 @@ from .matrix import (
     default_matrix,
     load_matrix,
 )
-from .plan import DEFAULT_COUNT, check_day_plan, check_goal_tree
-from .review import DEFAULT_MAX_AGE_DAYS, review_p2
-from .workspace import WorkspaceError, load_workspace
+from .plan import DEFAULT_COUNT
+from .review import DEFAULT_MAX_AGE_DAYS
+from .workspace import WorkspaceError, check_workspace, load_workspace
 
 
 def _matrix(args: argparse.Namespace) -> Matrix:
-    return load_matrix(args.matrix) if args.matrix else default_matrix()
+    # Same fallback as the MCP server, so the CLI and an agent classify with the same table.
+    path = args.matrix or os.environ.get("PRIORITYKIT_MATRIX")
+    return load_matrix(path) if path else default_matrix()
 
 
 def _print(obj: Any, as_json: bool, text: str) -> None:
@@ -75,26 +78,36 @@ def cmd_validate_matrix(args: argparse.Namespace) -> int:
 
 def cmd_check(args: argparse.Namespace) -> int:
     ws = load_workspace(args.file)
-    today = date.fromisoformat(args.today) if args.today else (ws.today_date or date.today())
-    out: dict[str, Any] = {"goal_tree_errors": check_goal_tree(ws.goals)}
-    lines = [f"error: {e}" for e in out["goal_tree_errors"]]
-    ok = not out["goal_tree_errors"]
+    run_date = date.fromisoformat(args.today) if args.today else date.today()
+    report = check_workspace(
+        ws,
+        run_date,
+        count=args.count,
+        max_age_days=args.max_age,
+        departures_per_month=args.departures,
+        matrix=_matrix(args),
+    )
 
-    if ws.today is not None:
-        plan = check_day_plan(ws.today, ws.goals, args.count)
-        out["today"] = plan.to_dict()
-        ok = ok and plan.ok
-        lines.append(f"today ({len(ws.today)} goals): {'ok' if plan.ok else 'invalid'}")
-        lines += [f"  error: {e}" for e in plan.errors if e not in out["goal_tree_errors"]]
+    if report.goal_tree_errors:
+        lines = ["goal tree: invalid"]
+        lines += [f"  error: {e}" for e in report.goal_tree_errors]
+    else:
+        lines = [
+            f"goal tree: ok ({report.annual_count} annual, {report.quarterly_count} quarterly)"
+        ]
+
+    plan = report.today
+    if plan is not None:
+        lines.append(f"today ({len(plan.traces)} goals): {'ok' if plan.ok else 'invalid'}")
+        lines += [f"  error: {e}" for e in plan.errors if e not in report.goal_tree_errors]
         lines += ["  " + " <- ".join(t) for t in plan.traces]
         if plan.annual_without_slot:
             lines.append(
                 "  annual goals with no slot today: " + "; ".join(plan.annual_without_slot)
             )
 
-    if ws.p2:
-        rep = review_p2(ws.p2, today, args.max_age, args.departures, _matrix(args))
-        out["p2_review"] = rep.to_dict()
+    rep = report.p2_review
+    if rep is not None:
         lines.append(f"P2 list: {len(ws.p2)} items")
         lines += [f"  promote: {i.title} ({c.level})" for i, c in rep.promote]
         lines += [f"  delete (older than {args.max_age} days): {i.title}" for i in rep.delete]
@@ -102,9 +115,10 @@ def cmd_check(args: argparse.Namespace) -> int:
         if rep.expected_wait_months is not None:
             lines.append(f"  expected wait for a new item: {rep.expected_wait_months:.1f} months")
 
-    out["ok"] = ok
-    _print(out, args.json, "\n".join(lines))
-    return 0 if ok else 1
+    lines += [f"warning: {w}" for w in report.warnings]
+    _print(report.to_dict(), args.json, "\n".join(lines))
+    failed = not report.ok or (args.strict and bool(report.warnings))
+    return 1 if failed else 0
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -140,7 +154,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     k = sub.add_parser("check", help="check a priorities.toml file")
     k.add_argument("file")
-    k.add_argument("--today", help="date for the P2 review (default: [today] date or today)")
+    k.add_argument(
+        "--today",
+        help="run date for P2 ages and the stale-plan check, e.g. 2026-11-24 (default: the "
+        "current date)",
+    )
+    k.add_argument(
+        "--strict",
+        action="store_true",
+        help="exit 1 on warnings too, such as a [today] date before the run date",
+    )
     k.add_argument("--count", type=int, default=DEFAULT_COUNT, help="daily goal count (default 3)")
     k.add_argument(
         "--max-age",

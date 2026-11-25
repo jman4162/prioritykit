@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.2.1 (2026-11-24)
+
+- `check` and the `check_workspace` tool count P2 ages from the run date (the current date, or
+  `--today`) instead of the `[today]` date. A file nobody updated for two weeks used to age its P2
+  list from two weeks ago.
+- Both warn when `[today]` is dated before the run date, and `check --strict` exits 1 on any
+  warning. JSON output adds `run_date`, `goal_counts`, and `warnings`, and the `check_workspace`
+  tool now returns `ok` like the CLI.
+- `check` prints a `goal tree:` line first, so a file with only goals no longer prints a blank line.
+- `python -m prioritykit` runs the CLI.
+- The MCP server reports the package version in `serverInfo` instead of an empty string.
+- `check_workspace` reads only `.toml` files. `PRIORITYKIT_ROOT` limits it to one directory, and
+  `PRIORITYKIT_TOOLS=pure` leaves it out of the server.
+- The CLI reads `PRIORITYKIT_MATRIX` when `--matrix` is not given, as the MCP server does.
+- New library function `check_workspace` and its `WorkspaceReport`.
+
 ## 0.2.0 (2026-11-24)
 
 First release on PyPI.
