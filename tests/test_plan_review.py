@@ -5,14 +5,19 @@ import pytest
 
 from prioritykit import (
     DailyGoal,
+    DayPlan,
     Goal,
     P2Item,
+    WorkspaceError,
     check_day_plan,
     check_goal_tree,
+    check_workspace,
     littles_law_wait,
     load_workspace,
     replan_for_p0,
     review_p2,
+    slot_coverage,
+    workspace_from_dict,
 )
 
 GOALS = [
@@ -122,3 +127,65 @@ def test_example_workspace_is_valid() -> None:
     rep = review_p2(ws.p2, date(2026, 11, 24))
     assert [i.title for i, _ in rep.promote] == ["Renew the passport before the spring trip"]
     assert [i.title for i in rep.delete] == ["Reorganize the photo library"]
+
+
+def test_slot_coverage_over_a_week() -> None:
+    days = [DayPlan(date(2026, 11, d), (TODAY[0], TODAY[2])) for d in range(18, 25)]
+    days.append(DayPlan(date(2026, 11, 17), (TODAY[1],)))  # outside the 7-day window
+    cov = slot_coverage(GOALS, days, date(2026, 11, 24))
+    assert cov.window_start == date(2026, 11, 18) and cov.window_days == 7
+    assert cov.days_with_plans == 7
+    assert cov.quarterly_without_slot == ("Strength train 3 times a week",)
+    assert cov.annual_without_slot == ("Stay strong and fit",)
+
+
+def test_slot_coverage_reports_how_much_history_it_had() -> None:
+    p0 = DailyGoal("Outage", p0=True, displaces="Review a design doc")
+    days = [
+        DayPlan(date(2026, 11, 23), (p0, TODAY[1])),
+        DayPlan(date(2026, 11, 24), (TODAY[1],)),
+        DayPlan(date(2026, 11, 24), (TODAY[2],)),  # same date twice counts once
+    ]
+    cov = slot_coverage(GOALS, days, date(2026, 11, 24))
+    assert cov.days_with_plans == 2
+    assert cov.quarterly_without_slot == ("Mentor a junior scientist",)
+    with pytest.raises(ValueError):
+        slot_coverage(GOALS, days, date(2026, 11, 24), window_days=0)
+
+
+def test_workspace_reads_history_due_dates_and_confirmed() -> None:
+    ws = workspace_from_dict(
+        {
+            "goal": [
+                {"id": "a", "title": "A", "horizon": "annual"},
+                {
+                    "id": "q",
+                    "title": "Q",
+                    "horizon": "quarterly",
+                    "parent": "a",
+                    "due": "2026-11-20",
+                },
+            ],
+            "day": [{"date": "2026-11-23", "goals": [{"title": "T", "parent": "q"}]}],
+            "p2": [{"title": "x", "added": "2026-11-01", "confirmed": False}],
+        }
+    )
+    assert ws.history == (DayPlan(date(2026, 11, 23), (DailyGoal("T", "q"),)),)
+    assert ws.goals[1].due == date(2026, 11, 20)
+    assert ws.p2[0].confirmed is False
+    report = check_workspace(ws, date(2026, 11, 24))
+    assert report.warnings == ("goal 'Q' was due 2026-11-20; remove it or set a new due date",)
+    assert report.coverage is not None and report.coverage.days_with_plans == 1
+    assert check_workspace(ws, date(2026, 11, 20)).warnings == ()
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        {"p2": [{"title": "x", "added": "2026-11-01", "confirmed": "false"}]},
+        {"day": [{"goals": []}]},
+    ],
+)
+def test_workspace_rejects_bad_history_and_confirmed(data: dict[str, object]) -> None:
+    with pytest.raises(WorkspaceError):
+        workspace_from_dict(data)

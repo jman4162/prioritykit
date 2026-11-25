@@ -26,6 +26,7 @@ id = "mentor"
 title = "Mentor a junior scientist"
 horizon = "quarterly"
 parent = "lead"
+due = 2026-12-31   # optional; check warns once this date has passed
 
 [[goal]]
 id = "evenings"
@@ -55,8 +56,27 @@ goals = [
   { title = "45-minute strength session", parent = "strength" },
 ]
 
+# Past day plans, optional. Each morning, move yesterday's [today] here. check lists the goals
+# that got no slot in the last 7 days (--window), counting [today].
+[[day]]
+date = 2026-11-23
+goals = [
+  { title = "Outline the December post", parent = "monthly-post" },
+  { title = "Pair on the eval harness with a teammate", parent = "mentor" },
+  { title = "Dinner and bedtime, phone in another room", parent = "evenings" },
+]
+
+[[day]]
+date = 2026-11-22
+goals = [
+  { title = "45-minute strength session", parent = "strength" },
+  { title = "Family hike", parent = "evenings" },
+  { title = "Draft two sections of the December post", parent = "monthly-post" },
+]
+
 # The P2 list. Scores are optional; rescored items that now map to P1 or P0 are promotion
-# candidates, and old items that still score low are deletion candidates.
+# candidates, and old items that still score low are deletion candidates. confirmed = false
+# marks scores an agent proposed that the person has not confirmed.
 [[p2]]
 title = "Reorganize the photo library"
 added = 2026-05-02
@@ -68,6 +88,7 @@ title = "Renew the passport before the spring trip"
 added = 2026-10-01
 importance = 4
 urgency = 3
+confirmed = false
 
 [[p2]]
 title = "Try a new note-taking app"

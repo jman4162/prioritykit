@@ -20,7 +20,7 @@ from .matrix import (
     default_matrix,
     load_matrix,
 )
-from .plan import DEFAULT_COUNT
+from .plan import DEFAULT_COUNT, DEFAULT_WINDOW_DAYS
 from .review import DEFAULT_MAX_AGE_DAYS
 from .workspace import WorkspaceError, check_workspace, load_workspace
 
@@ -76,6 +76,10 @@ def cmd_validate_matrix(args: argparse.Namespace) -> int:
     return 0 if report.ok else 1
 
 
+def _proposed(confirmed: bool) -> str:
+    return "" if confirmed else " (proposed)"
+
+
 def cmd_check(args: argparse.Namespace) -> int:
     ws = load_workspace(args.file)
     run_date = date.fromisoformat(args.today) if args.today else date.today()
@@ -86,6 +90,7 @@ def cmd_check(args: argparse.Namespace) -> int:
         max_age_days=args.max_age,
         departures_per_month=args.departures,
         matrix=_matrix(args),
+        window_days=args.window,
     )
 
     if report.goal_tree_errors:
@@ -106,12 +111,32 @@ def cmd_check(args: argparse.Namespace) -> int:
                 "  annual goals with no slot today: " + "; ".join(plan.annual_without_slot)
             )
 
+    cov = report.coverage
+    if cov is not None:
+        plural = "" if cov.days_with_plans == 1 else "s"
+        lines.append(
+            f"last {cov.window_days} days ({cov.window_start} to {cov.window_end}): "
+            f"plans on {cov.days_with_plans} day{plural}"
+        )
+        if cov.quarterly_without_slot:
+            lines.append("  quarterly goals with no slot: " + "; ".join(cov.quarterly_without_slot))
+        if cov.annual_without_slot:
+            lines.append("  annual goals with no slot: " + "; ".join(cov.annual_without_slot))
+        if not (cov.quarterly_without_slot or cov.annual_without_slot):
+            lines.append("  every goal had a slot")
+
     rep = report.p2_review
     if rep is not None:
         lines.append(f"P2 list: {len(ws.p2)} items")
-        lines += [f"  promote: {i.title} ({c.level})" for i, c in rep.promote]
-        lines += [f"  delete (older than {args.max_age} days): {i.title}" for i in rep.delete]
-        lines += [f"  keep: {i.title}" for i in rep.keep]
+        lines += [
+            f"  promote: {i.title} ({c.level}{'' if i.confirmed else ', proposed'})"
+            for i, c in rep.promote
+        ]
+        lines += [
+            f"  delete (older than {args.max_age} days): {i.title}{_proposed(i.confirmed)}"
+            for i in rep.delete
+        ]
+        lines += [f"  keep: {i.title}{_proposed(i.confirmed)}" for i in rep.keep]
         if rep.expected_wait_months is not None:
             lines.append(f"  expected wait for a new item: {rep.expected_wait_months:.1f} months")
 
@@ -165,6 +190,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="exit 1 on warnings too, such as a [today] date before the run date",
     )
     k.add_argument("--count", type=int, default=DEFAULT_COUNT, help="daily goal count (default 3)")
+    k.add_argument(
+        "--window",
+        type=int,
+        default=DEFAULT_WINDOW_DAYS,
+        help="days of [[day]] history to check for goals with no slot (default 7)",
+    )
     k.add_argument(
         "--max-age",
         type=int,

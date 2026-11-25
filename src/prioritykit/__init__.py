@@ -22,7 +22,17 @@ from .matrix import (
     load_matrix,
     matrix_from_dict,
 )
-from .plan import DailyGoal, Goal, PlanReport, check_day_plan, check_goal_tree, replan_for_p0
+from .plan import (
+    CoverageReport,
+    DailyGoal,
+    DayPlan,
+    Goal,
+    PlanReport,
+    check_day_plan,
+    check_goal_tree,
+    replan_for_p0,
+    slot_coverage,
+)
 from .review import P2Item, ReviewReport, littles_law_wait, review_p2
 from .workspace import (
     Workspace,
@@ -42,7 +52,9 @@ __all__ = [
     "LEVELS",
     "Anchor",
     "Classification",
+    "CoverageReport",
     "DailyGoal",
+    "DayPlan",
     "Goal",
     "Level",
     "LevelInfo",
@@ -68,5 +80,6 @@ __all__ = [
     "matrix_from_dict",
     "replan_for_p0",
     "review_p2",
+    "slot_coverage",
     "workspace_from_dict",
 ]

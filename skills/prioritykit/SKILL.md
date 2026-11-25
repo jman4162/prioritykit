@@ -16,24 +16,32 @@ tools, so the result is the same every time. If the MCP server is not connected,
    give a one-line reason, for example: "Importance 4 (directly advances the quarterly goal
    'Ship the design review'); urgency 2 (waiting a month costs little)."
 3. Call `classify_task` and report the level and its action.
-4. Ask the person to confirm or change the scores before you act on the level.
+4. Ask the person to confirm or change the scores before you act on the level. If the person is
+   not there to confirm (a scheduled or unattended run), record the scores as proposed
+   (`confirmed = false` on a P2 item) and leave the decision to them.
 
 Importance takes precedence. Urgency alone never lifts work of importance 1 or 2 above P2, so
 do not argue a low-importance task up the list because its deadline is close.
 
 ## P0 means interrupt
 
-Never label work P0 on your own. When the person confirms a P0, ask which of today's three goals
-it displaces, call `replan_for_p0`, and show the revised plan.
+Never label work P0 on your own. `classify_task` returns `requires_confirmation: true` for P0,
+and a P0 you propose stays a proposal until the person confirms it. When the person confirms a
+P0, ask which of today's three goals it displaces, call `replan_for_p0`, and show the revised
+plan.
 
 ## Each morning
 
-1. Read the goal tree (from `priorities.toml` with `check_workspace`, or from the person).
+1. Read the goal tree (from `priorities.toml` with `check_workspace`, or from the person). If
+   `check_workspace` returns warnings, such as a stale `[today]` date or a past-due goal, tell the
+   person first.
 2. Propose exactly three goals for the day. Each one names the quarterly goal it advances.
    Word each so the person can tell at night whether it happened ("45-minute strength session"
    rather than "work on fitness").
 3. Call `check_day_plan` and fix every error before you present the plan.
-4. Mention annual goals with no slot today only if one has gone without a slot all week.
+4. To say a goal has gone without a slot, call `check_week` with the past week's plans (the
+   `[[day]]` entries in `priorities.toml`, or plans you saved) and quote `days_with_plans`.
+   Without past plans, say nothing about unslotted goals.
 
 ## Small, piled-up, and fun work
 
@@ -46,7 +54,10 @@ it displaces, call `replan_for_p0`, and show the revised plan.
 
 Treat P2 as work that will probably not happen. Do not bring up P2 items during normal planning.
 At the person's periodic review, call `review_p2`, present the promote and delete candidates, and
-let the person decide each one. A promoted item needs a dated slot in an upcoming day's three.
+let the person decide each one, marking items with `confirmed = false` as proposed scores. A
+promoted item needs a dated slot in an upcoming day's three. A P2 item that blocks P1 work takes
+on that work's importance; rescore it instead of waiting for it to age. At the weekly review,
+call `check_week` to list the quarterly goals that got no slot.
 
 ## Work you generate
 

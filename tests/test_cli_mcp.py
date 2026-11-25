@@ -46,7 +46,7 @@ def test_cli_check_example(capsys: pytest.CaptureFixture[str]) -> None:
     assert out.startswith("goal tree: ok (4 annual, 4 quarterly)\n")
     assert "today (3 goals): ok" in out
     assert "warning" not in out
-    assert "promote: Renew the passport before the spring trip (P1)" in out
+    assert "promote: Renew the passport before the spring trip (P1, proposed)" in out
     assert "expected wait for a new item: 1.0 months" in out
 
 
@@ -93,6 +93,26 @@ def test_cli_check_plan_for_tomorrow_is_not_stale(
     assert code == 0 and json.loads(out)["warnings"] == []
 
 
+def test_cli_check_history_and_proposed_scores(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = tmp_path / "p.toml"
+    path.write_text(
+        GOALS_TOML
+        + '[[goal]]\nid = "q2"\ntitle = "Q2"\nhorizon = "quarterly"\nparent = "a"\n'
+        + plan_toml("2026-11-24")
+        + '[[day]]\ndate = 2026-11-23\ngoals = [{ title = "T", parent = "q" }]\n'
+        + '[[day]]\ndate = 2026-11-01\ngoals = [{ title = "Old", parent = "q2" }]\n'
+        + '[[p2]]\ntitle = "Guess"\nadded = 2026-11-20\nimportance = 4\nurgency = 1\n'
+        + "confirmed = false\n"
+    )
+    code, out = run(capsys, "check", str(path), "--today", "2026-11-24")
+    assert code == 0, out
+    assert "last 7 days (2026-11-18 to 2026-11-24): plans on 2 days" in out
+    assert "  quarterly goals with no slot: Q2" in out
+    assert "  promote: Guess (P1, proposed)" in out
+
+
 def test_cli_check_goal_tree_only(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     path = tmp_path / "p.toml"
     path.write_text(GOALS_TOML)
@@ -137,8 +157,10 @@ def test_cli_errors_exit_2(capsys: pytest.CaptureFixture[str]) -> None:
 
 
 def test_tool_functions() -> None:
-    assert srv.tool_classify_task(4, 5, "Outage")["level"] == "P0"
-    assert srv.tool_classify_task(4, 4)["level"] == "P1"
+    p0 = srv.tool_classify_task(4, 5, "Outage")
+    assert p0["level"] == "P0" and p0["requires_confirmation"] is True
+    p1 = srv.tool_classify_task(4, 4)
+    assert p1["level"] == "P1" and p1["requires_confirmation"] is False
     rubric = srv.tool_get_rubric()
     assert rubric["counts"] == {"P0": 2, "P1": 10, "P2": 7, "drop": 6}
     goals = [
@@ -150,9 +172,13 @@ def test_tool_functions() -> None:
     replanned = srv.tool_replan_for_p0(goals, today, "Fire", "T1")
     assert replanned["check"]["ok"] and replanned["today"][1]["p0"]
     rep = srv.tool_review_p2(
-        [srv.P2In(title="x", added="2026-01-01", importance=4, urgency=1)], "2026-11-24"
+        [srv.P2In(title="x", added="2026-01-01", importance=4, urgency=1, confirmed=False)],
+        "2026-11-24",
     )
-    assert rep["promote"][0]["level"] == "P1"
+    assert rep["promote"][0]["level"] == "P1" and rep["promote"][0]["confirmed"] is False
+    days = [srv.DayIn(date=f"2026-11-{d}", goals=today) for d in (20, 21)]
+    week = srv.tool_check_week(goals, days, "2026-11-24")
+    assert week["days_with_plans"] == 2 and week["quarterly_without_slot"] == []
     assert srv.tool_wait_estimate(120, 3)["expected_wait_months"] == 40
     assert srv.tool_check_workspace(EXAMPLE)["today"]["ok"]
 
@@ -177,6 +203,7 @@ def test_server_registers_tools() -> None:
         "check_day_plan",
         "replan_for_p0",
         "review_p2",
+        "check_week",
         "wait_estimate",
         "check_workspace",
     }
@@ -210,7 +237,7 @@ def test_pure_tool_set_reads_no_files(monkeypatch: pytest.MonkeyPatch) -> None:
     pytest.importorskip("mcp")
     monkeypatch.setenv("PRIORITYKIT_TOOLS", "pure")
     names = {t.name for t in asyncio.run(srv.build_server().list_tools())}
-    assert "check_workspace" not in names and len(names) == 6
+    assert "check_workspace" not in names and len(names) == 7
     monkeypatch.setenv("PRIORITYKIT_TOOLS", "everything")
     with pytest.raises(ValueError):
         srv.build_server()

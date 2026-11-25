@@ -4,6 +4,7 @@ Under strict priority the lowest level only gets the capacity the higher levels 
 list grows unless something takes items off it. The review is that something. Items whose
 current scores now map to P1 or P0 are promotion candidates; items older than ``max_age_days``
 that still score P2 or lower, or were never scored, are deletion candidates; the rest stay.
+Each entry carries ``confirmed``, so an agent's proposed scores reach the review marked as such.
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ class P2Item:
     added: date
     importance: int | None = None
     urgency: int | None = None
+    confirmed: bool = True  # False: an agent proposed the scores and the person has not confirmed
 
 
 @dataclass(frozen=True)
@@ -36,13 +38,22 @@ class ReviewReport:
     def to_dict(self) -> dict[str, Any]:
         return {
             "promote": [
-                {"title": item.title, "added": item.added.isoformat(), **c.to_dict()}
+                {
+                    "title": item.title,
+                    "added": item.added.isoformat(),
+                    "confirmed": item.confirmed,
+                    **c.to_dict(),
+                }
                 for item, c in self.promote
             ],
-            "delete": [{"title": i.title, "added": i.added.isoformat()} for i in self.delete],
-            "keep": [{"title": i.title, "added": i.added.isoformat()} for i in self.keep],
+            "delete": [_entry(i) for i in self.delete],
+            "keep": [_entry(i) for i in self.keep],
             "expected_wait_months": self.expected_wait_months,
         }
+
+
+def _entry(item: P2Item) -> dict[str, Any]:
+    return {"title": item.title, "added": item.added.isoformat(), "confirmed": item.confirmed}
 
 
 def littles_law_wait(backlog: int, departures_per_period: float) -> float:

@@ -39,12 +39,20 @@ INSTRUCTIONS = """prioritykit applies a prioritization system. You propose, and 
 1. Scores: rate importance and urgency from 1 to 5 against the anchors from get_rubric, give a
    one-line reason for each score, and ask the human to confirm before you treat the level as
    settled. Importance takes precedence: urgency alone never lifts importance 1-2 work above P2.
-2. P0 means interrupt. Never label work P0 on your own. A confirmed P0 replaces one of today's
-   goals; call replan_for_p0 and have the human name the goal it displaces.
+   When no human is present to confirm (a scheduled or unattended run), record the scores as
+   proposed (confirmed = false on a P2 item) and leave the decision for the human.
+2. P0 means interrupt. Never label work P0 on your own; classify_task returns
+   requires_confirmation = true for P0, and a P0 you propose stays a proposal until the human
+   confirms it. A confirmed P0 replaces one of today's goals; call replan_for_p0 and have the
+   human name the goal it displaces.
 3. Each morning, propose exactly three goals for the day, each tied to a quarterly goal that
-   ties to an annual goal. Call check_day_plan before you present them and fix any error.
+   ties to an annual goal. Call check_day_plan before you present them and fix any error. To say
+   that a goal has gone without a slot, call check_week with past day plans and quote
+   days_with_plans; without past plans, do not make that claim.
 4. Treat P2 as work that will probably not happen. Do not raise P2 items outside a review. At a
-   review, call review_p2 and present the promote and delete candidates for the human to decide.
+   review, call review_p2 and present the promote and delete candidates for the human to decide,
+   marking any with confirmed = false as proposed scores. A P2 item that blocks P1 work takes on
+   that work's importance; rescore it instead of waiting for it to age.
 5. Score work you generate yourself (research leads, refactors, ideas) like any other task; if it
    advances no goal, the rules put it at P2 or drop.
 6. Quote numbers from tool results. Do not invent counts, dates, or waits.
@@ -60,6 +68,7 @@ class GoalIn(BaseModel):
     parent: str | None = Field(
         default=None, description="id of the annual parent, for quarterly goals"
     )
+    due: str | None = Field(default=None, description="optional ISO due date, e.g. 2026-12-18")
 
 
 class DailyGoalIn(BaseModel):
@@ -69,11 +78,19 @@ class DailyGoalIn(BaseModel):
     displaces: str | None = Field(default=None, description="for a P0 entry: the goal it replaced")
 
 
+class DayIn(BaseModel):
+    date: str = Field(description="ISO date of the plan, e.g. 2026-11-23")
+    goals: list[DailyGoalIn]
+
+
 class P2In(BaseModel):
     title: str
     added: str = Field(description="ISO date the item went on the list, e.g. 2026-11-24")
     importance: int | None = None
     urgency: int | None = None
+    confirmed: bool = Field(
+        default=True, description="false when an agent proposed the scores and no human confirmed"
+    )
 
 
 def _matrix() -> Matrix:
@@ -86,7 +103,8 @@ def _goals(goals: list[GoalIn]) -> list[plan_mod.Goal]:
     for g in goals:
         if g.horizon not in ("annual", "quarterly"):
             raise ValueError(f"goal {g.id!r}: horizon must be 'annual' or 'quarterly'")
-        out.append(plan_mod.Goal(g.id, g.title, g.horizon, g.parent))  # type: ignore[arg-type]
+        due = date.fromisoformat(g.due) if g.due else None
+        out.append(plan_mod.Goal(g.id, g.title, g.horizon, g.parent, due))  # type: ignore[arg-type]
     return out
 
 
@@ -111,6 +129,8 @@ def tool_get_rubric() -> dict[str, Any]:
 
 def tool_classify_task(importance: int, urgency: int, title: str | None = None) -> dict[str, Any]:
     result = classify(importance, urgency, _matrix()).to_dict()
+    # An agent may propose P0 but must not act on it until a human confirms.
+    result["requires_confirmation"] = result["level"] == "P0"
     if title:
         result["title"] = title
     return result
@@ -142,11 +162,26 @@ def tool_review_p2(
     max_age_days: int = DEFAULT_MAX_AGE_DAYS,
     departures_per_month: float | None = None,
 ) -> dict[str, Any]:
-    parsed = [P2Item(i.title, date.fromisoformat(i.added), i.importance, i.urgency) for i in items]
+    parsed = [
+        P2Item(i.title, date.fromisoformat(i.added), i.importance, i.urgency, i.confirmed)
+        for i in items
+    ]
     rep = review_p2_fn(
         parsed, date.fromisoformat(today), max_age_days, departures_per_month, _matrix()
     )
     return rep.to_dict()
+
+
+def tool_check_week(
+    goals: list[GoalIn],
+    days: list[DayIn],
+    today: str,
+    window_days: int = plan_mod.DEFAULT_WINDOW_DAYS,
+) -> dict[str, Any]:
+    plans = [plan_mod.DayPlan(date.fromisoformat(d.date), tuple(_daily(d.goals))) for d in days]
+    return plan_mod.slot_coverage(
+        _goals(goals), plans, date.fromisoformat(today), window_days
+    ).to_dict()
 
 
 def tool_wait_estimate(backlog: int, departures_per_month: float) -> dict[str, Any]:
@@ -240,6 +275,16 @@ def build_server() -> Any:
     ) -> dict[str, Any]:
         """Sort a P2 list into promote (rescored to P1 or P0), delete (old, still low), and keep."""
         return tool_review_p2(items, today, max_age_days, departures_per_month)
+
+    @server.tool()
+    def check_week(
+        goals: list[GoalIn],
+        days: list[DayIn],
+        today: str,
+        window_days: int = plan_mod.DEFAULT_WINDOW_DAYS,
+    ) -> dict[str, Any]:
+        """Goals with no slot in any day plan over the `window_days` days ending on `today`."""
+        return tool_check_week(goals, days, today, window_days)
 
     @server.tool()
     def wait_estimate(backlog: int, departures_per_month: float) -> dict[str, Any]:

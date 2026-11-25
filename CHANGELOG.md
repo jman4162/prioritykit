@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3.0 (2026-11-24)
+
+- Optional `[[day]]` history in the priorities file. `check` and the `check_workspace` tool list
+  the quarterly and annual goals that got no slot in the last 7 days (`--window`), counting
+  `[today]`, and how many of those days had a plan. The new MCP tool `check_week` and library
+  function `slot_coverage` take past plans directly.
+- Optional `confirmed = false` on P2 items marks scores an agent proposed. Review entries carry
+  `confirmed`, and `check` prints "proposed" next to them. `classify_task` returns
+  `requires_confirmation`, true for P0.
+- Optional `due` date on goals; `check` warns once it has passed.
+- The agent instructions and skill say to record proposed scores on unattended runs, to call
+  `check_week` before saying a goal went without a slot, and to rescore a P2 item that blocks P1
+  work.
+
 ## 0.2.1 (2026-11-24)
 
 - `check` and the `check_workspace` tool count P2 ages from the run date (the current date, or

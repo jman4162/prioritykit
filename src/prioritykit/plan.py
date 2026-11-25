@@ -3,17 +3,20 @@
 Annual goals sit at the root, quarterly goals point at an annual parent, and each of the day's
 goals points at a quarterly goal. A day plan holds exactly ``count`` goals (three by default).
 A P0 entry may stand in for a goal without a parent, because P0 work can be harm prevention
-that advances no goal, but it must name the goal it displaced.
+that advances no goal, but it must name the goal it displaced. Past day plans, kept as a short
+history, show which goals went without a slot over a window such as the last week.
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field, replace
+from datetime import date, timedelta
 from typing import Any, Literal
 
 Horizon = Literal["annual", "quarterly"]
 DEFAULT_COUNT = 3
+DEFAULT_WINDOW_DAYS = 7
 
 
 @dataclass(frozen=True)
@@ -22,6 +25,7 @@ class Goal:
     title: str
     horizon: Horizon
     parent: str | None = None
+    due: date | None = None
 
 
 @dataclass(frozen=True)
@@ -30,6 +34,14 @@ class DailyGoal:
     parent: str | None = None  # id of a quarterly goal
     p0: bool = False
     displaces: str | None = None  # for a P0 entry: the title of the goal it replaced
+
+
+@dataclass(frozen=True)
+class DayPlan:
+    """One day's goals, kept so later checks can see which goals got a slot."""
+
+    day: date
+    goals: tuple[DailyGoal, ...]
 
 
 @dataclass(frozen=True)
@@ -116,6 +128,74 @@ def check_day_plan(
 
     unslotted = tuple(g.title for g in goals if g.horizon == "annual" and g.id not in used_annual)
     return PlanReport(not errors, tuple(errors), tuple(traces), unslotted)
+
+
+@dataclass(frozen=True)
+class CoverageReport:
+    """Goals that got no slot in any day plan inside a window ending on the run date."""
+
+    window_start: date
+    window_end: date
+    days_with_plans: int
+    quarterly_without_slot: tuple[str, ...]
+    annual_without_slot: tuple[str, ...]
+
+    @property
+    def window_days(self) -> int:
+        return (self.window_end - self.window_start).days + 1
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "window_start": self.window_start.isoformat(),
+            "window_end": self.window_end.isoformat(),
+            "window_days": self.window_days,
+            "days_with_plans": self.days_with_plans,
+            "quarterly_without_slot": list(self.quarterly_without_slot),
+            "annual_without_slot": list(self.annual_without_slot),
+        }
+
+
+def slot_coverage(
+    goals: Iterable[Goal],
+    days: Iterable[DayPlan],
+    run_date: date,
+    window_days: int = DEFAULT_WINDOW_DAYS,
+) -> CoverageReport:
+    """List the goals no day plan gave a slot in the ``window_days`` days ending on ``run_date``.
+
+    A daily goal fills a slot for its quarterly parent and that goal's annual parent. Plans
+    outside the window are ignored. ``days_with_plans`` counts the distinct dates in the window
+    that have a plan, so a caller with two days of history cannot claim "no slot all week".
+    """
+    if window_days < 1:
+        raise ValueError("window_days must be at least 1")
+    goals = list(goals)
+    by_id = {g.id: g for g in goals}
+    start = run_date - timedelta(days=window_days - 1)
+    dates: set[date] = set()
+    slotted: set[str] = set()
+    for plan in days:
+        if not start <= plan.day <= run_date:
+            continue
+        dates.add(plan.day)
+        for d in plan.goals:
+            q = by_id.get(d.parent) if d.parent else None
+            if q is None or q.horizon != "quarterly":
+                continue
+            slotted.add(q.id)
+            if q.parent:
+                slotted.add(q.parent)
+    return CoverageReport(
+        window_start=start,
+        window_end=run_date,
+        days_with_plans=len(dates),
+        quarterly_without_slot=tuple(
+            g.title for g in goals if g.horizon == "quarterly" and g.id not in slotted
+        ),
+        annual_without_slot=tuple(
+            g.title for g in goals if g.horizon == "annual" and g.id not in slotted
+        ),
+    )
 
 
 def replan_for_p0(daily: Sequence[DailyGoal], p0_title: str, displaces: str) -> list[DailyGoal]:
