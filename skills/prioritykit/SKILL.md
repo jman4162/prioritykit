@@ -18,7 +18,7 @@ tools, so the result is the same every time. If the MCP server is not connected,
 3. Call `classify_task` and report the level and its action.
 4. Ask the person to confirm or change the scores before you act on the level. If the person is
    not there to confirm (a scheduled or unattended run), record the scores as proposed
-   (`confirmed = false` on a P2 item) and leave the decision to them.
+   (`confirmed = false` on a P2 item, or on a day plan you wrote) and leave the decision to them.
 
 Importance takes precedence. Urgency alone never lifts work of importance 1 or 2 above P2, so
 do not argue a low-importance task up the list because its deadline is close.
@@ -41,7 +41,11 @@ plan.
 3. Call `check_day_plan` and fix every error before you present the plan.
 4. To say a goal has gone without a slot, call `check_week` with the past week's plans (the
    `[[day]]` entries in `priorities.toml`, or plans you saved) and quote `days_with_plans`.
-   Without past plans, say nothing about unslotted goals.
+   Without past plans, say nothing about unslotted goals. A slot in a plan with
+   `confirmed = false` is a proposal; quote the `*_without_confirmed_slot` lists when you mean
+   goals the person never committed time to.
+5. When choosing the three, favor goals in `due_soon` whose `slot` is `"none"`, and quote
+   `days_left`.
 
 ## Small, piled-up, and fun work
 
@@ -54,8 +58,9 @@ plan.
 
 Treat P2 as work that will probably not happen. Do not bring up P2 items during normal planning.
 At the person's periodic review, call `review_p2`, present the promote and delete candidates, and
-let the person decide each one, marking items with `confirmed = false` as proposed scores. A
-promoted item needs a dated slot in an upcoming day's three. A P2 item that blocks P1 work takes
+let the person decide each one, marking items with `confirmed = false` as proposed scores. Items
+in `confirm` are old and the person never confirmed them (`confirmed = false`): ask the person to
+score or delete each one. A promoted item needs a dated slot in an upcoming day's three. A P2 item that blocks P1 work takes
 on that work's importance; rescore it instead of waiting for it to age. At the weekly review,
 call `check_week` to list the quarterly goals that got no slot.
 

@@ -48,6 +48,11 @@ class Classification:
     importance_anchor: str
     urgency_anchor: str
 
+    @property
+    def requires_confirmation(self) -> bool:
+        """P0 interrupts the day's plan, so an agent may propose it but a person must confirm."""
+        return self.level == "P0"
+
     def describe(self) -> str:
         label = "Drop" if self.level == "drop" else f"{self.level} ({self.name})"
         return f"Importance {self.importance}, urgency {self.urgency}: {label}. {self.action}"
@@ -61,6 +66,7 @@ class Classification:
             "action": self.action,
             "importance_anchor": self.importance_anchor,
             "urgency_anchor": self.urgency_anchor,
+            "requires_confirmation": self.requires_confirmation,
             "summary": self.describe(),
         }
 

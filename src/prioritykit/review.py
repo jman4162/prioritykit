@@ -5,6 +5,9 @@ list grows unless something takes items off it. The review is that something. It
 current scores now map to P1 or P0 are promotion candidates; items older than ``max_age_days``
 that still score P2 or lower, or were never scored, are deletion candidates; the rest stay.
 Each entry carries ``confirmed``, so an agent's proposed scores reach the review marked as such.
+An old item with ``confirmed=False`` (an agent added or scored it, and no person has confirmed)
+goes to ``confirm`` instead of ``delete``: a person scores it or deletes it, so a batch approval
+of the delete list never removes an item nobody looked at.
 """
 
 from __future__ import annotations
@@ -34,6 +37,7 @@ class ReviewReport:
     delete: tuple[P2Item, ...]
     keep: tuple[P2Item, ...]
     expected_wait_months: float | None
+    confirm: tuple[P2Item, ...] = ()  # old and unconfirmed: a person scores it or deletes it
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -47,6 +51,7 @@ class ReviewReport:
                 for item, c in self.promote
             ],
             "delete": [_entry(i) for i in self.delete],
+            "confirm": [_entry(i) for i in self.confirm],
             "keep": [_entry(i) for i in self.keep],
             "expected_wait_months": self.expected_wait_months,
         }
@@ -79,6 +84,7 @@ def review_p2(
     items = list(items)
     promote: list[tuple[P2Item, Classification]] = []
     delete: list[P2Item] = []
+    confirm: list[P2Item] = []
     keep: list[P2Item] = []
     for item in items:
         age = (today - item.added).days
@@ -87,13 +93,15 @@ def review_p2(
             if RANK[c.level] > RANK["P2"]:
                 promote.append((item, c))
                 continue
-        if age > max_age_days:
-            delete.append(item)
-        else:
+        if age <= max_age_days:
             keep.append(item)
+        elif not item.confirmed:
+            confirm.append(item)
+        else:
+            delete.append(item)
     wait = (
         littles_law_wait(len(items), departures_per_month)
         if departures_per_month is not None
         else None
     )
-    return ReviewReport(tuple(promote), tuple(delete), tuple(keep), wait)
+    return ReviewReport(tuple(promote), tuple(delete), tuple(keep), wait, tuple(confirm))

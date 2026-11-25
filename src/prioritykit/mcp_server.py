@@ -40,7 +40,8 @@ INSTRUCTIONS = """prioritykit applies a prioritization system. You propose, and 
    one-line reason for each score, and ask the human to confirm before you treat the level as
    settled. Importance takes precedence: urgency alone never lifts importance 1-2 work above P2.
    When no human is present to confirm (a scheduled or unattended run), record the scores as
-   proposed (confirmed = false on a P2 item) and leave the decision for the human.
+   proposed (confirmed = false on a P2 item, or on a day plan you wrote) and leave the decision
+   for the human.
 2. P0 means interrupt. Never label work P0 on your own; classify_task returns
    requires_confirmation = true for P0, and a P0 you propose stays a proposal until the human
    confirms it. A confirmed P0 replaces one of today's goals; call replan_for_p0 and have the
@@ -48,11 +49,15 @@ INSTRUCTIONS = """prioritykit applies a prioritization system. You propose, and 
 3. Each morning, propose exactly three goals for the day, each tied to a quarterly goal that
    ties to an annual goal. Call check_day_plan before you present them and fix any error. To say
    that a goal has gone without a slot, call check_week with past day plans and quote
-   days_with_plans; without past plans, do not make that claim.
+   days_with_plans; without past plans, do not make that claim. A slot in a plan with
+   confirmed = false is a proposal, not a commitment; the *_without_confirmed_slot lists leave
+   those plans out. Prefer goals in check_week's due_soon whose slot is "none", and quote
+   days_left.
 4. Treat P2 as work that will probably not happen. Do not raise P2 items outside a review. At a
    review, call review_p2 and present the promote and delete candidates for the human to decide,
-   marking any with confirmed = false as proposed scores. A P2 item that blocks P1 work takes on
-   that work's importance; rescore it instead of waiting for it to age.
+   marking any with confirmed = false as proposed scores. Items in confirm are old and no human
+   has confirmed them: ask the human to score or delete each one. A P2 item that blocks P1 work
+   takes on that work's importance; rescore it instead of waiting for it to age.
 5. Score work you generate yourself (research leads, refactors, ideas) like any other task; if it
    advances no goal, the rules put it at P2 or drop.
 6. Quote numbers from tool results. Do not invent counts, dates, or waits.
@@ -81,6 +86,9 @@ class DailyGoalIn(BaseModel):
 class DayIn(BaseModel):
     date: str = Field(description="ISO date of the plan, e.g. 2026-11-23")
     goals: list[DailyGoalIn]
+    confirmed: bool = Field(
+        default=True, description="false when an agent proposed the plan and no human confirmed"
+    )
 
 
 class P2In(BaseModel):
@@ -128,9 +136,7 @@ def tool_get_rubric() -> dict[str, Any]:
 
 
 def tool_classify_task(importance: int, urgency: int, title: str | None = None) -> dict[str, Any]:
-    result = classify(importance, urgency, _matrix()).to_dict()
-    # An agent may propose P0 but must not act on it until a human confirms.
-    result["requires_confirmation"] = result["level"] == "P0"
+    result = classify(importance, urgency, _matrix()).to_dict()  # has requires_confirmation
     if title:
         result["title"] = title
     return result
@@ -177,11 +183,16 @@ def tool_check_week(
     days: list[DayIn],
     today: str,
     window_days: int = plan_mod.DEFAULT_WINDOW_DAYS,
+    due_within_days: int = plan_mod.DEFAULT_DUE_WITHIN_DAYS,
 ) -> dict[str, Any]:
-    plans = [plan_mod.DayPlan(date.fromisoformat(d.date), tuple(_daily(d.goals))) for d in days]
-    return plan_mod.slot_coverage(
-        _goals(goals), plans, date.fromisoformat(today), window_days
-    ).to_dict()
+    plans = [
+        plan_mod.DayPlan(date.fromisoformat(d.date), tuple(_daily(d.goals)), d.confirmed)
+        for d in days
+    ]
+    parsed, run_date = _goals(goals), date.fromisoformat(today)
+    coverage = plan_mod.slot_coverage(parsed, plans, run_date, window_days)
+    due = plan_mod.due_soon(parsed, run_date, due_within_days, plans, window_days)
+    return {**coverage.to_dict(), "due_soon": [d.to_dict() for d in due]}
 
 
 def tool_wait_estimate(backlog: int, departures_per_month: float) -> dict[str, Any]:
@@ -205,10 +216,21 @@ def _workspace_path(path: str) -> Path:
     return resolved
 
 
-def tool_check_workspace(path: str, today: str | None = None) -> dict[str, Any]:
+def tool_check_workspace(
+    path: str,
+    today: str | None = None,
+    window_days: int = plan_mod.DEFAULT_WINDOW_DAYS,
+    due_within_days: int = plan_mod.DEFAULT_DUE_WITHIN_DAYS,
+) -> dict[str, Any]:
     ws = load_workspace(_workspace_path(path))
     run_date = date.fromisoformat(today) if today else date.today()
-    return check_workspace_fn(ws, run_date, matrix=_matrix()).to_dict()
+    return check_workspace_fn(
+        ws,
+        run_date,
+        matrix=_matrix(),
+        window_days=window_days,
+        due_within_days=due_within_days,
+    ).to_dict()
 
 
 def _tool_set() -> str:
@@ -273,7 +295,8 @@ def build_server() -> Any:
         max_age_days: int = DEFAULT_MAX_AGE_DAYS,
         departures_per_month: float | None = None,
     ) -> dict[str, Any]:
-        """Sort a P2 list into promote (rescored to P1 or P0), delete (old, still low), and keep."""
+        """Sort a P2 list into promote (rescored to P1 or P0), delete (old, still low), confirm
+        (old, confirmed = false: the human scores or deletes it), and keep."""
         return tool_review_p2(items, today, max_age_days, departures_per_month)
 
     @server.tool()
@@ -282,9 +305,11 @@ def build_server() -> Any:
         days: list[DayIn],
         today: str,
         window_days: int = plan_mod.DEFAULT_WINDOW_DAYS,
+        due_within_days: int = plan_mod.DEFAULT_DUE_WITHIN_DAYS,
     ) -> dict[str, Any]:
-        """Goals with no slot in any day plan over the `window_days` days ending on `today`."""
-        return tool_check_week(goals, days, today, window_days)
+        """Goals with no slot over the `window_days` days ending on `today`, counting all plans
+        and confirmed plans only, plus goals due within `due_within_days` days and their slot."""
+        return tool_check_week(goals, days, today, window_days, due_within_days)
 
     @server.tool()
     def wait_estimate(backlog: int, departures_per_month: float) -> dict[str, Any]:
@@ -294,13 +319,19 @@ def build_server() -> Any:
     if tool_set == "all":
 
         @server.tool()
-        def check_workspace(path: str, today: str | None = None) -> dict[str, Any]:
-            """Check a local priorities .toml file: goal tree, today's plan, P2 review, warnings.
+        def check_workspace(
+            path: str,
+            today: str | None = None,
+            window_days: int = plan_mod.DEFAULT_WINDOW_DAYS,
+            due_within_days: int = plan_mod.DEFAULT_DUE_WITHIN_DAYS,
+        ) -> dict[str, Any]:
+            """Check a local priorities .toml file: goal tree, today's plan, P2 review, slot
+            coverage from [[day]] history, goals due soon, and warnings.
 
             `today` is the run date (default: the current date). Only .toml files are read,
             and only inside PRIORITYKIT_ROOT when the server sets it.
             """
-            return tool_check_workspace(path, today)
+            return tool_check_workspace(path, today, window_days, due_within_days)
 
     return server
 

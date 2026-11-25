@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.4.0 (2026-11-25)
+
+- Optional `confirmed = false` on `[[day]]` and `[today]` marks a plan an agent proposed. Coverage
+  adds `days_with_confirmed_plans`, `quarterly_without_confirmed_slot`, and
+  `annual_without_confirmed_slot` beside the existing fields, which keep counting every plan.
+  `check` prints how many days were proposed and the goals slotted only in proposals, and marks a
+  proposed `[today]`; its JSON `today` entry carries `confirmed`.
+- Goals due within 28 days of the run date (`check --due-within`) appear in a new `due_soon` list,
+  each with `days_left` and `slot`: `confirmed`, `proposed`, or `none`, judged from the last 7
+  days of plans plus any later plan such as tomorrow's `[today]`, or `null` when no plan falls in
+  that range. `check_week` and `check_workspace` take `due_within_days`, `check_workspace` also
+  takes `window_days`, and the library adds `due_soon` and `DueGoal`.
+- `requires_confirmation` moved into the library's classification result, so `classify --json`
+  and promoted P2 entries carry it as the `classify_task` tool does.
+- Behavior change: an old P2 item with `confirmed = false` goes to a new `confirm` list instead of
+  `delete`, so approving the delete list never removes an item no person has looked at.
+- Behavior change: two `[[day]]` entries with one date are an error, and `slot_coverage` and
+  `check_week` reject duplicate dates. A `[[day]]` with the same date as `[today]` is ignored for
+  coverage, with a warning.
+- A date field written as a TOML date and time, such as `due = 2026-12-01T09:00:00`, is a clear
+  error instead of a crash. `check` rejects `--window` below 1 and a negative `--due-within`
+  whatever the file holds.
+
 ## 0.3.0 (2026-11-24)
 
 - Optional `[[day]]` history in the priorities file. `check` and the `check_workspace` tool list

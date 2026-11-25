@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 import sys
+from collections import Counter
 from collections.abc import Sequence
 from datetime import date
 from typing import Any
@@ -20,7 +21,7 @@ from .matrix import (
     default_matrix,
     load_matrix,
 )
-from .plan import DEFAULT_COUNT, DEFAULT_WINDOW_DAYS
+from .plan import DEFAULT_COUNT, DEFAULT_DUE_WITHIN_DAYS, DEFAULT_WINDOW_DAYS, DueGoal
 from .review import DEFAULT_MAX_AGE_DAYS
 from .workspace import WorkspaceError, check_workspace, load_workspace
 
@@ -80,6 +81,18 @@ def _proposed(confirmed: bool) -> str:
     return "" if confirmed else " (proposed)"
 
 
+def _due_line(d: DueGoal, window_days: int) -> str:
+    n = d.days_left
+    left = "due today" if n == 0 else f"{n} day{'s' if n != 1 else ''} left"
+    slot = {
+        "confirmed": "; slotted in a confirmed plan",
+        "proposed": "; slotted only in proposed plans",
+        "none": f"; no slot in the last {window_days} days or in a later plan",
+        None: "",
+    }[d.slot]
+    return f"  {d.title} (due {d.due.isoformat()}, {left}{slot})"
+
+
 def cmd_check(args: argparse.Namespace) -> int:
     ws = load_workspace(args.file)
     run_date = date.fromisoformat(args.today) if args.today else date.today()
@@ -91,6 +104,7 @@ def cmd_check(args: argparse.Namespace) -> int:
         departures_per_month=args.departures,
         matrix=_matrix(args),
         window_days=args.window,
+        due_within_days=args.due_within,
     )
 
     if report.goal_tree_errors:
@@ -103,7 +117,10 @@ def cmd_check(args: argparse.Namespace) -> int:
 
     plan = report.today
     if plan is not None:
-        lines.append(f"today ({len(plan.traces)} goals): {'ok' if plan.ok else 'invalid'}")
+        proposed_today = "" if report.today_confirmed else ", proposed"
+        lines.append(
+            f"today ({len(plan.traces)} goals{proposed_today}): {'ok' if plan.ok else 'invalid'}"
+        )
         lines += [f"  error: {e}" for e in plan.errors if e not in report.goal_tree_errors]
         lines += ["  " + " <- ".join(t) for t in plan.traces]
         if plan.annual_without_slot:
@@ -114,16 +131,32 @@ def cmd_check(args: argparse.Namespace) -> int:
     cov = report.coverage
     if cov is not None:
         plural = "" if cov.days_with_plans == 1 else "s"
+        proposed = cov.days_with_plans - cov.days_with_confirmed_plans
         lines.append(
             f"last {cov.window_days} days ({cov.window_start} to {cov.window_end}): "
             f"plans on {cov.days_with_plans} day{plural}"
+            + (f" ({proposed} proposed)" if proposed else "")
         )
         if cov.quarterly_without_slot:
             lines.append("  quarterly goals with no slot: " + "; ".join(cov.quarterly_without_slot))
         if cov.annual_without_slot:
             lines.append("  annual goals with no slot: " + "; ".join(cov.annual_without_slot))
-        if not (cov.quarterly_without_slot or cov.annual_without_slot):
+        for horizon, confirmed_view, any_view in (
+            ("quarterly", cov.quarterly_without_confirmed_slot, cov.quarterly_without_slot),
+            ("annual", cov.annual_without_confirmed_slot, cov.annual_without_slot),
+        ):
+            # Multiset difference, so two goals that share a title are both counted.
+            only = list((Counter(confirmed_view) - Counter(any_view)).elements())
+            if only:
+                lines.append(
+                    f"  {horizon} goals slotted only in proposed plans: " + "; ".join(only)
+                )
+        if not (cov.quarterly_without_confirmed_slot or cov.annual_without_confirmed_slot):
             lines.append("  every goal had a slot")
+
+    if report.due_soon:
+        lines.append(f"due within {args.due_within} days:")
+        lines += [_due_line(d, args.window) for d in report.due_soon]
 
     rep = report.p2_review
     if rep is not None:
@@ -132,9 +165,10 @@ def cmd_check(args: argparse.Namespace) -> int:
             f"  promote: {i.title} ({c.level}{'' if i.confirmed else ', proposed'})"
             for i, c in rep.promote
         ]
+        lines += [f"  delete (older than {args.max_age} days): {i.title}" for i in rep.delete]
         lines += [
-            f"  delete (older than {args.max_age} days): {i.title}{_proposed(i.confirmed)}"
-            for i in rep.delete
+            f"  confirm or delete (older than {args.max_age} days, not confirmed): {i.title}"
+            for i in rep.confirm
         ]
         lines += [f"  keep: {i.title}{_proposed(i.confirmed)}" for i in rep.keep]
         if rep.expected_wait_months is not None:
@@ -195,6 +229,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=DEFAULT_WINDOW_DAYS,
         help="days of [[day]] history to check for goals with no slot (default 7)",
+    )
+    k.add_argument(
+        "--due-within",
+        type=int,
+        default=DEFAULT_DUE_WITHIN_DAYS,
+        help="list goals due within this many days of the run date (default 28)",
     )
     k.add_argument(
         "--max-age",

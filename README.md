@@ -81,8 +81,9 @@ prioritykit validate-matrix my-matrix.json
 Every command takes `--json`. `check` exits with status 1 when the goal tree or today's plan
 breaks a rule, so it can run in a pre-commit hook or a scheduled job. It counts P2 ages from the
 run date, which is the current date unless you pass `--today`, and warns when `[today]` is dated
-before the run date; `--strict` exits 1 on warnings too. `python -m prioritykit` runs the same CLI
-when the console script is not on your PATH. Output for the example:
+before the run date; `--strict` exits 1 on warnings too. It lists goals due within 28 days of the
+run date (`--due-within`) as information, not as warnings. `python -m prioritykit` runs the same
+CLI when the console script is not on your PATH. Output for the example:
 
 ```text
 goal tree: ok (4 annual, 4 quarterly)
@@ -91,8 +92,11 @@ today (3 goals): ok
   Dinner and bedtime, phone in another room <- Protect weekday evenings <- Be present with my family
   45-minute strength session <- Strength train 3 times a week <- Stay strong and fit
   annual goals with no slot today: Publish technical writing
-last 7 days (2026-11-18 to 2026-11-24): plans on 3 days
-  every goal had a slot
+last 7 days (2026-11-18 to 2026-11-24): plans on 3 days (1 proposed)
+  quarterly goals slotted only in proposed plans: One post a month
+  annual goals slotted only in proposed plans: Publish technical writing
+due within 28 days:
+  Mentor a junior scientist (due 2026-12-18, 24 days left; slotted in a confirmed plan)
 P2 list: 3 items
   promote: Renew the passport before the spring trip (P1, proposed)
   delete (older than 90 days): Reorganize the photo library
@@ -104,44 +108,55 @@ P2 list: 3 items
 
 ```toml
 [[goal]]
-id = "fit"
-title = "Stay strong and fit"
+id = "lead"
+title = "Grow as a technical lead"
 horizon = "annual"
 
 [[goal]]
-id = "strength"
-title = "Strength train 3 times a week"
+id = "mentor"
+title = "Mentor a junior scientist"
 horizon = "quarterly"
-parent = "fit"
-due = 2026-12-31   # optional; check warns once the date has passed
+parent = "lead"
+due = 2026-12-18   # optional; listed within --due-within days, a warning once it has passed
 
 [today]
 date = 2026-11-24
 goals = [
-  { title = "45-minute strength session", parent = "strength" },
+  { title = "Review a design doc with a teammate", parent = "mentor" },
   # ... exactly three entries; a P0 entry is { title = "...", p0 = true, displaces = "..." }
 ]
 
 [[day]]          # optional history: each morning, move yesterday's [today] here
 date = 2026-11-23
+confirmed = false   # optional, here or on [today]; an agent proposed this plan, you have not confirmed
 goals = [
-  { title = "45-minute strength session", parent = "strength" },
+  { title = "Pair on the eval harness with a teammate", parent = "mentor" },
   # ...
 ]
 
 [[p2]]
-title = "Reorganize the photo library"
-added = 2026-05-02
-importance = 2   # optional; rescored items that now map to P1 or P0 are promotion candidates
-urgency = 1
-confirmed = false   # optional; scores an agent proposed and you have not confirmed
+title = "Renew the passport before the spring trip"
+added = 2026-10-01
+importance = 4   # optional; rescored items that now map to P1 or P0 are promotion candidates
+urgency = 3
+confirmed = false   # optional; an agent added or scored it and you have not confirmed
 ```
 
 [`examples/priorities.toml`](https://github.com/jman4162/prioritykit/blob/main/examples/priorities.toml) is a complete file. A P2 item older than
 90 days that still scores P2 or lower, or was never scored, is a deletion candidate; change the
-threshold with `--max-age`. With `[[day]]` history, `check` lists the quarterly and annual goals
-that no plan gave a slot in the last 7 days (`--window`), counting `[today]`, and says how many of
-those days had a plan.
+threshold with `--max-age`. An old item marked `confirmed = false` goes on a separate "confirm or
+delete" list instead, so approving the delete list never removes an item nobody has looked at.
+
+With `[[day]]` history, `check` lists the quarterly and annual goals that no plan gave a slot in
+the last 7 days (`--window`), counting `[today]`, and says how many of those days had a plan. A
+plan with `confirmed = false` is a proposal: the JSON output lists goals without a slot both ways
+(`quarterly_without_slot` counts every plan, `quarterly_without_confirmed_slot` only confirmed
+ones), and the text output names the goals slotted only in proposals. `[today]` with
+`confirmed = false` prints as proposed and carries `"confirmed": false` in the JSON. Each goal in
+`due_soon` carries `days_left` and `slot`: `"confirmed"`, `"proposed"`, or `"none"`, judged from
+the last 7 days of plans plus any later plan such as tomorrow's `[today]`, or `null` when there
+is no plan to judge by. Keep one plan per date. A `[[day]]` with the same date as `[today]` is ignored, with a warning, and
+two `[[day]]` entries with one date are an error.
 
 Goal titles can name employer-internal projects or private matters, so keep your priorities file
 in a private repository, not a public one.
@@ -156,8 +171,8 @@ The server speaks stdio and exposes eight tools. All but `check_workspace` are p
 | `classify_task` | the level and action for an importance and urgency pair, and `requires_confirmation` (true for P0) |
 | `check_day_plan` | whether today holds exactly three goals, each traced to quarterly and annual goals |
 | `replan_for_p0` | today's plan with one goal replaced by a confirmed P0, rechecked |
-| `check_week` | goals no day plan gave a slot over the last N days, and how many days had a plan |
-| `review_p2` | promote, delete, and keep lists for a P2 review |
+| `check_week` | goals no day plan gave a slot over the last N days, counting all plans and confirmed plans only, how many days had a plan, and goals due soon with their slot |
+| `review_p2` | promote, delete, confirm, and keep lists for a P2 review |
 | `wait_estimate` | expected months on a list, by Little's law |
 | `check_workspace` | all of the above for a local `priorities.toml`, plus warnings such as a stale `[today]` date |
 
@@ -176,8 +191,8 @@ Claude Desktop (`claude_desktop_config.json`):
 The server's instructions tell the agent to propose scores with a reason for each and wait for
 the human to confirm, or record them as proposed (`confirmed = false`) when no human is present;
 never to label work P0 on its own; to call `check_day_plan` before presenting a day's three goals
-and `check_week` before saying a goal has gone without a slot; and to raise P2 items only during
-a review. Work the agent
+and `check_week` before saying a goal has gone without a slot; to favor goals that are due soon
+and have no slot; and to raise P2 items only during a review. Work the agent
 generates for itself is scored like any other task. The same protocol is written out as an agent
 skill in [`skills/prioritykit/SKILL.md`](https://github.com/jman4162/prioritykit/blob/main/skills/prioritykit/SKILL.md); copy it into
 `~/.claude/skills/` or adapt it for an `AGENTS.md` file.
