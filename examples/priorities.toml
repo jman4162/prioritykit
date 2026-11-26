@@ -58,7 +58,8 @@ goals = [
 
 # Past day plans, optional. Each morning, move yesterday's [today] here. check lists the goals
 # that got no slot in the last 7 days (--window), counting [today]. confirmed = false marks a
-# plan an agent proposed that the person has not confirmed; it works on [today] too.
+# plan an agent proposed that the person has not confirmed; it works on [today] too. At the
+# evening review, record each goal's outcome with done = "done", "partial", or "missed".
 [[day]]
 date = 2026-11-23
 confirmed = false
@@ -71,15 +72,15 @@ goals = [
 [[day]]
 date = 2026-11-22
 goals = [
-  { title = "45-minute strength session", parent = "strength" },
-  { title = "Family hike", parent = "evenings" },
-  { title = "Plan the week's meals", parent = "evenings" },
+  { title = "45-minute strength session", parent = "strength", done = "done" },
+  { title = "Family hike", parent = "evenings", done = "done" },
+  { title = "Plan the week's meals", parent = "evenings", done = "partial" },
 ]
 
-# The P2 list. Scores are optional; rescored items that now map to P1 or P0 are promotion
-# candidates, and old items that still score low are deletion candidates. confirmed = false
-# marks an item an agent added or scored that the person has not confirmed; once old, it goes to
-# a "confirm or delete" list instead of the delete list.
+# The P2 list. Scores are optional, but give both or neither; rescored items that now map to P1
+# or P0 are promotion candidates, and old items that still score low are deletion candidates.
+# confirmed = false marks an item an agent added or scored that the person has not confirmed;
+# once old, it goes to a "confirm or delete" list instead of the delete list.
 [[p2]]
 title = "Reorganize the photo library"
 added = 2026-05-02

@@ -30,7 +30,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: ["3.11", "3.12", "3.13"]
+        python: ["3.11", "3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@v5
       - uses: astral-sh/setup-uv@v7
@@ -50,3 +50,13 @@ jobs:
           python-version: "3.11"
       - run: pip install .
       - run: prioritykit check examples/priorities.toml
+      - name: the MCP commands explain the missing extra instead of a traceback
+        run: |
+          for cmd in "prioritykit mcp" "prioritykit-mcp"; do
+            status=0
+            out=$($cmd 2>&1 </dev/null) || status=$?
+            echo "$cmd -> $status: $out"
+            test "$status" -eq 2
+            echo "$out" | grep -q "pip install 'prioritykit\[mcp\]'"
+            if echo "$out" | grep -q Traceback; then exit 1; fi
+          done

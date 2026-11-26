@@ -1,7 +1,9 @@
 import asyncio
 import json
+import re
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -369,3 +371,108 @@ def test_check_workspace_path_rules(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     for bad in (outside / "p.toml", inside / "link.toml", inside / ".." / "b" / "p.toml"):
         with pytest.raises(ValueError, match="outside PRIORITYKIT_ROOT"):
             srv.tool_check_workspace(str(bad))
+
+
+def test_mcp_without_the_extra_says_how_to_install(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setitem(sys.modules, "pydantic", None)  # importing it now raises ImportError
+    monkeypatch.delitem(sys.modules, "prioritykit.mcp_server")
+    assert cli.main(["mcp"]) == 2
+    assert cli.run_mcp() == 2  # the prioritykit-mcp console script
+    err = capsys.readouterr().err
+    assert err.count("prioritykit: the MCP server needs the mcp extra: pip install") == 2
+    assert "Traceback" not in err
+
+
+def test_cli_check_outcomes_future_p2_and_json(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    code, out = run(capsys, "check", EXAMPLE, "--today", "2026-11-24", "--departures", "3")
+    assert "  outcomes: 2 done, 1 partial, 0 missed, 0 not recorded\n" in out
+
+    data = tomllib.loads(Path(EXAMPLE).read_text(encoding="utf-8"))
+    as_json = tmp_path / "priorities.json"
+    as_json.write_text(json.dumps(data, default=str))
+    assert run(capsys, "check", str(as_json), "--today", "2026-11-24", "--departures", "3") == (
+        code,
+        out,
+    )
+
+    path = tmp_path / "p.toml"
+    path.write_text(
+        GOALS_TOML + plan_toml("2026-11-24") + '[[p2]]\ntitle = "x"\nadded = 2027-03-01\n'
+    )
+    code, out = run(capsys, "check", str(path), "--today", "2026-11-24")
+    assert code == 0 and "outcomes" not in out  # nothing recorded, so no outcomes line
+    assert "warning: [[p2]] 'x' added 2027-03-01 is after the run date" in out
+    assert cli.main(["check", str(path), "--today", "2026-11-24", "--strict"]) == 1
+
+
+def test_cli_check_half_scored_p2_is_an_error(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = tmp_path / "p.toml"
+    path.write_text(GOALS_TOML + '[[p2]]\ntitle = "x"\nadded = 2026-01-01\nimportance = 5\n')
+    assert cli.main(["check", str(path), "--today", "2026-11-24"]) == 2
+    assert "[[p2]] 'x': give both importance and urgency, or neither" in capsys.readouterr().err
+
+
+def test_tools_take_outcomes_and_reject_half_scores() -> None:
+    goals = [
+        srv.GoalIn(id="a", title="A", horizon="annual"),
+        srv.GoalIn(id="q", title="Q", horizon="quarterly", parent="a"),
+    ]
+    today = [
+        srv.DailyGoalIn(title="T0", parent="q", done="done"),
+        srv.DailyGoalIn(title="T1", parent="q", done="missed"),
+        srv.DailyGoalIn(title="T2", parent="q"),
+    ]
+    week = srv.tool_check_week(goals, [srv.DayIn(date="2026-11-23", goals=today)], "2026-11-24")
+    assert week["outcomes"] == {"done": 1, "partial": 0, "missed": 1, "not_recorded": 1}
+    assert srv.tool_replan_for_p0(goals, today, "Fire", "T2")["today"][0]["done"] == "done"
+    with pytest.raises(ValueError, match="'x': give both importance and urgency"):
+        srv.tool_review_p2([srv.P2In(title="x", added="2026-01-01", importance=4)], "2026-11-24")
+    with pytest.raises(ValueError, match=r"only \.toml"):  # JSON is for the CLI and library
+        srv.tool_check_workspace("priorities.json")
+
+
+def test_mcp_startup_errors_are_one_line(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("PRIORITYKIT_TOOLS", "none")
+    assert cli.run_mcp() == 2
+    assert "prioritykit: PRIORITYKIT_TOOLS must be one of all, pure" in capsys.readouterr().err
+    monkeypatch.delenv("PRIORITYKIT_TOOLS")
+
+    monkeypatch.setitem(sys.modules, "mcp", None)  # pydantic is there, the mcp package is not
+    with pytest.raises(ImportError, match=re.escape("pip install 'prioritykit[mcp]'")):
+        srv._server_class()
+    monkeypatch.undo()
+
+    real_import = srv.importlib.import_module
+
+    def broken(name: str) -> object:
+        if name.startswith("mcp.server"):
+            raise ImportError("cannot import name 'X' from 'httpx'")
+        return real_import(name)
+
+    monkeypatch.setattr(srv.importlib, "import_module", broken)
+    with pytest.raises(ImportError, match=r"no usable server class.*httpx") as info:
+        srv._server_class()
+    assert "pip install" not in str(info.value)  # reinstalling the extra would not help
+
+
+def test_check_workspace_tool_and_cli_take_departures(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = tmp_path / "p.toml"
+    items = "".join(f'[[p2]]\ntitle = "item {k}"\nadded = 2026-11-01\n' for k in range(12))
+    path.write_text(GOALS_TOML + items)
+    report = srv.tool_check_workspace(
+        str(path), "2026-11-24", departures_per_month=3, max_age_days=90
+    )
+    assert report["p2_review"]["expected_wait_months"] == 4
+    assert report["warnings"][0].endswith("holds at most 8 items")
+    assert cli.main(["check", str(path), "--departures", "nan"]) == 2
+    assert "departures must be a finite number" in capsys.readouterr().err

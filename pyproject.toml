@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "prioritykit"
-version = "0.4.0"
+version = "0.5.0"
 description = "Deterministic rules for importance-urgency scoring, P0/P1/P2 levels, and three daily goals, for people and AI agents"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -29,6 +29,7 @@ classifiers = [
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
   "Topic :: Office/Business :: Scheduling",
   "Typing :: Typed",
 ]
@@ -42,11 +43,12 @@ mcp = ["mcp>=1.26,<3"]
 [project.urls]
 Homepage = "https://github.com/jman4162/prioritykit"
 Issues = "https://github.com/jman4162/prioritykit/issues"
+Changelog = "https://github.com/jman4162/prioritykit/blob/main/CHANGELOG.md"
 "Background post" = "https://john-hodge.com/blog/why-p2-work-rarely-gets-done/"
 
 [project.scripts]
 prioritykit = "prioritykit.cli:main"
-prioritykit-mcp = "prioritykit.mcp_server:main"
+prioritykit-mcp = "prioritykit.cli:run_mcp"
 
 [dependency-groups]
 dev = ["pytest>=8", "ruff>=0.6", "mypy>=1.13", "mcp>=1.26,<3"]

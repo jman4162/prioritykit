@@ -5,7 +5,8 @@ goals points at a quarterly goal. A day plan holds exactly ``count`` goals (thre
 A P0 entry may stand in for a goal without a parent, because P0 work can be harm prevention
 that advances no goal, but it must name the goal it displaced. Past day plans, kept as a short
 history, show which goals went without a slot over a window such as the last week. A day plan
-an agent proposed and the person has not confirmed counts separately from a committed one.
+an agent proposed and the person has not confirmed counts separately from a committed one. Each
+daily goal can record its outcome at the evening review: done, partial, or missed.
 """
 
 from __future__ import annotations
@@ -17,6 +18,8 @@ from typing import Any, Literal
 
 Horizon = Literal["annual", "quarterly"]
 Slot = Literal["confirmed", "proposed", "none"]
+Outcome = Literal["done", "partial", "missed"]
+OUTCOMES: tuple[Outcome, ...] = ("done", "partial", "missed")
 DEFAULT_COUNT = 3
 DEFAULT_WINDOW_DAYS = 7
 DEFAULT_DUE_WITHIN_DAYS = 28
@@ -37,6 +40,14 @@ class DailyGoal:
     parent: str | None = None  # id of a quarterly goal
     p0: bool = False
     displaces: str | None = None  # for a P0 entry: the title of the goal it replaced
+    done: Outcome | None = None  # recorded at the evening review; None until then
+
+    def __post_init__(self) -> None:
+        if self.done is not None and self.done not in OUTCOMES:
+            raise ValueError(
+                f"daily goal {self.title!r}: done must be one of "
+                f"{', '.join(repr(o) for o in OUTCOMES)}, got {self.done!r}"
+            )
 
 
 @dataclass(frozen=True)
@@ -139,7 +150,9 @@ class CoverageReport:
     """Goals that got no slot in the day plans inside a window ending on the run date.
 
     The ``*_without_slot`` fields count every plan. The ``*_without_confirmed_slot`` fields count
-    only plans the person confirmed, so each lists the same goals or more.
+    only plans the person confirmed, so each lists the same goals or more. The outcome counts
+    cover the goals in the window's confirmed plans; ``not_recorded`` counts goals with no
+    outcome, leaving out the run date's own plan, whose evening review may not have happened.
     """
 
     window_start: date
@@ -150,6 +163,10 @@ class CoverageReport:
     days_with_confirmed_plans: int
     quarterly_without_confirmed_slot: tuple[str, ...]
     annual_without_confirmed_slot: tuple[str, ...]
+    done: int = 0
+    partial: int = 0
+    missed: int = 0
+    not_recorded: int = 0
 
     @property
     def window_days(self) -> int:
@@ -166,6 +183,12 @@ class CoverageReport:
             "annual_without_slot": list(self.annual_without_slot),
             "quarterly_without_confirmed_slot": list(self.quarterly_without_confirmed_slot),
             "annual_without_confirmed_slot": list(self.annual_without_confirmed_slot),
+            "outcomes": {
+                "done": self.done,
+                "partial": self.partial,
+                "missed": self.missed,
+                "not_recorded": self.not_recorded,
+            },
         }
 
 
@@ -222,7 +245,8 @@ def slot_coverage(
     outside the window are ignored, and two plans on one date raise ``ValueError``.
     ``days_with_plans`` counts the dates in the window that have a plan, so a caller with two
     days of history cannot claim "no slot all week". The confirmed-only fields leave out plans
-    with ``confirmed=False``.
+    with ``confirmed=False``. Outcomes are counted over the goals in confirmed plans; a goal
+    planned for ``run_date`` with no outcome yet is not counted as unrecorded.
     """
     goals = list(goals)
     by_id = {g.id: g for g in goals}
@@ -234,6 +258,9 @@ def slot_coverage(
     def without(horizon: Horizon, slotted: set[str]) -> tuple[str, ...]:
         return tuple(g.title for g in goals if g.horizon == horizon and g.id not in slotted)
 
+    outcomes = [
+        d.done for p in confirmed for d in p.goals if d.done is not None or p.day < run_date
+    ]
     return CoverageReport(
         window_start=start,
         window_end=run_date,
@@ -243,6 +270,10 @@ def slot_coverage(
         days_with_confirmed_plans=len(confirmed),
         quarterly_without_confirmed_slot=without("quarterly", confirmed_slot),
         annual_without_confirmed_slot=without("annual", confirmed_slot),
+        done=outcomes.count("done"),
+        partial=outcomes.count("partial"),
+        missed=outcomes.count("missed"),
+        not_recorded=outcomes.count(None),
     )
 
 

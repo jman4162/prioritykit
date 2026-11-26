@@ -1,17 +1,21 @@
-"""Read and check a plain-text priorities file (TOML).
+"""Read and check a plain-text priorities file (TOML, or JSON with the same layout).
 
 A person or an agent keeps goals, today's plan, and the P2 list in one TOML file under their own
 version control, and the CLI or MCP server reads and checks it. See
-``examples/priorities.toml`` for the format.
+``examples/priorities.toml`` for the format. A file ending in ``.json`` is read as JSON, with
+dates written as strings such as ``"2026-11-24"``.
 """
 
 from __future__ import annotations
 
+import json
+import math
 import tomllib
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 from .matrix import Matrix
 from .plan import (
@@ -30,6 +34,8 @@ from .plan import (
     slot_coverage,
 )
 from .review import DEFAULT_MAX_AGE_DAYS, P2Item, ReviewReport, review_p2
+
+T = TypeVar("T")
 
 
 class WorkspaceError(ValueError):
@@ -63,35 +69,95 @@ def _bool(value: Any, where: str) -> bool:
     return value
 
 
-def _daily_goals(entries: list[dict[str, Any]], where: str) -> tuple[DailyGoal, ...]:
-    try:
-        return tuple(
-            DailyGoal(
-                title=str(d["title"]),
-                parent=d.get("parent"),
-                p0=bool(d.get("p0", False)),
-                displaces=d.get("displaces"),
+# JSON writers spell a missing optional field as null, so None reads the same as an absent key.
+
+
+def _flag(d: dict[str, Any], key: str, default: bool, where: str) -> bool:
+    value = d.get(key)
+    return default if value is None else _bool(value, where)
+
+
+def _text(value: Any, where: str) -> str:
+    if not isinstance(value, str):
+        raise WorkspaceError(f"{where}: expected text, got {value!r}")
+    return value
+
+
+def _ident(value: Any, where: str) -> str:
+    """A goal id or a reference to one. Whole numbers read as text, so ``parent = 1`` finds id 1."""
+    if isinstance(value, bool) or not isinstance(value, (str, int)):
+        raise WorkspaceError(f'{where}: expected an id such as "mentor", got {value!r}')
+    return str(value)
+
+
+def _optional(value: Any, parse: Callable[[Any, str], T], where: str) -> T | None:
+    return None if value is None else parse(value, where)
+
+
+def _records(value: Any, where: str) -> list[dict[str, Any]]:
+    """A list of tables; anything else is a malformed file, not a crash."""
+    if value is None:
+        return []
+    if not isinstance(value, list) or not all(isinstance(v, dict) for v in value):
+        raise WorkspaceError(f"{where} must be a list of tables")
+    return value
+
+
+def _require(d: dict[str, Any], keys: tuple[str, ...], message: str) -> None:
+    for key in keys:
+        if d.get(key) is None:
+            raise WorkspaceError(f"{message}; missing {key!r}")
+
+
+def _goal(g: dict[str, Any]) -> Goal:
+    _require(g, ("id", "title", "horizon"), "every [[goal]] needs id, title, and horizon")
+    gid = _ident(g["id"], "[[goal]] id")
+    where = f"[[goal]] {gid!r}"
+    return Goal(
+        id=gid,
+        title=_text(g["title"], f"{where} title"),
+        horizon=g["horizon"],
+        parent=_optional(g.get("parent"), _ident, f"{where} parent"),
+        due=_optional(g.get("due"), _date, f"{where} due"),
+    )
+
+
+def _daily_goals(entries: Any, where: str) -> tuple[DailyGoal, ...]:
+    out: list[DailyGoal] = []
+    for d in _records(entries, f"goals in {where}"):
+        _require(d, ("title",), f"every goal in {where} needs a title")
+        title = _text(d["title"], f"a goal title in {where}")
+        at = f"{where} goal {title!r}"
+        try:
+            out.append(
+                DailyGoal(
+                    title=title,
+                    parent=_optional(d.get("parent"), _ident, f"{at} parent"),
+                    p0=_flag(d, "p0", False, f"{at} p0"),
+                    displaces=_optional(d.get("displaces"), _text, f"{at} displaces"),
+                    done=d.get("done"),
+                )
             )
-            for d in entries
-        )
-    except KeyError as exc:
-        raise WorkspaceError(f"every goal in {where} needs a title; missing {exc}") from exc
+        except WorkspaceError:
+            raise
+        except ValueError as exc:
+            raise WorkspaceError(f"{where}: {exc}") from None
+    return tuple(out)
+
+
+def _p2_item(i: dict[str, Any]) -> P2Item:
+    _require(i, ("title", "added"), "every [[p2]] item needs title and added")
+    title = _text(i["title"], "[[p2]] title")
+    added = _date(i["added"], f"[[p2]] {title!r} added")
+    confirmed = _flag(i, "confirmed", True, f"[[p2]] {title!r} confirmed")
+    try:
+        return P2Item(title, added, i.get("importance"), i.get("urgency"), confirmed)
+    except ValueError as exc:
+        raise WorkspaceError(f"[[p2]] {exc}") from None
 
 
 def workspace_from_dict(data: dict[str, Any]) -> Workspace:
-    try:
-        goals = tuple(
-            Goal(
-                id=str(g["id"]),
-                title=str(g["title"]),
-                horizon=g["horizon"],
-                parent=g.get("parent"),
-                due=_date(g["due"], f"[[goal]] {g['id']!r} due") if "due" in g else None,
-            )
-            for g in data.get("goal", [])
-        )
-    except KeyError as exc:
-        raise WorkspaceError(f"every [[goal]] needs id, title, and horizon; missing {exc}") from exc
+    goals = tuple(_goal(g) for g in _records(data.get("goal"), "[[goal]]"))
     bad = [g.id for g in goals if g.horizon not in ("annual", "quarterly")]
     if bad:
         raise WorkspaceError(f"horizon must be 'annual' or 'quarterly' for goals {bad}")
@@ -99,15 +165,17 @@ def workspace_from_dict(data: dict[str, Any]) -> Workspace:
     today = None
     today_date = None
     today_confirmed = True
-    if "today" in data:
+    if data.get("today") is not None:
         t = data["today"]
-        today_date = _date(t["date"], "[today] date") if "date" in t else None
-        today = _daily_goals(t.get("goals", []), "[today]")
-        today_confirmed = _bool(t.get("confirmed", True), "[today] confirmed")
+        if not isinstance(t, dict):
+            raise WorkspaceError("[today] must be a table")
+        today_date = _optional(t.get("date"), _date, "[today] date")
+        today = _daily_goals(t.get("goals"), "[today]")
+        today_confirmed = _flag(t, "confirmed", True, "[today] confirmed")
 
     history: list[DayPlan] = []
-    for d in data.get("day", []):
-        if "date" not in d:
+    for d in _records(data.get("day"), "[[day]]"):
+        if d.get("date") is None:
             raise WorkspaceError("every [[day]] needs a date")
         day = _date(d["date"], "[[day]] date")
         if any(p.day == day for p in history):
@@ -115,32 +183,30 @@ def workspace_from_dict(data: dict[str, Any]) -> Workspace:
         history.append(
             DayPlan(
                 day,
-                _daily_goals(d.get("goals", []), f"[[day]] {day}"),
-                _bool(d.get("confirmed", True), f"[[day]] {day} confirmed"),
+                _daily_goals(d.get("goals"), f"[[day]] {day}"),
+                _flag(d, "confirmed", True, f"[[day]] {day} confirmed"),
             )
         )
 
-    try:
-        p2 = tuple(
-            P2Item(
-                title=str(i["title"]),
-                added=_date(i["added"], f"[[p2]] {i.get('title')!r} added"),
-                importance=i.get("importance"),
-                urgency=i.get("urgency"),
-                confirmed=_bool(i.get("confirmed", True), f"[[p2]] {i.get('title')!r} confirmed"),
-            )
-            for i in data.get("p2", [])
-        )
-    except KeyError as exc:
-        raise WorkspaceError(f"every [[p2]] item needs title and added; missing {exc}") from exc
+    p2 = tuple(_p2_item(i) for i in _records(data.get("p2"), "[[p2]]"))
     return Workspace(goals, today, today_date, p2, tuple(history), today_confirmed)
 
 
 def load_workspace(path: str | Path) -> Workspace:
-    try:
-        data = tomllib.loads(Path(path).read_text(encoding="utf-8"))
-    except tomllib.TOMLDecodeError as exc:
-        raise WorkspaceError(f"{path}: {exc}") from exc
+    """Read a priorities file: JSON when the name ends in ``.json``, TOML otherwise."""
+    text = Path(path).read_text(encoding="utf-8")
+    if Path(path).suffix.lower() == ".json":
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise WorkspaceError(f"{path}: {exc}") from exc
+        if not isinstance(data, dict):
+            raise WorkspaceError(f"{path}: the top level must be an object")
+    else:
+        try:
+            data = tomllib.loads(text)
+        except tomllib.TOMLDecodeError as exc:
+            raise WorkspaceError(f"{path}: {exc}") from exc
     return workspace_from_dict(data)
 
 
@@ -203,6 +269,9 @@ def check_workspace(
     on ``run_date``, counting the dated ``[today]`` plan as one of those days; a ``[[day]]`` with
     the same date as ``[today]`` is left out, with a warning. When any goal has a ``due`` date,
     ``due_soon`` lists the goals due within ``due_within_days`` days and their slot in the window.
+    A P2 item added more than a day after ``run_date`` is a warning. With
+    ``departures_per_month``, a P2 list whose
+    Little's-law wait is longer than ``max_age_days`` is a warning that names the size that fits.
     """
     if window_days < 1:
         raise ValueError(f"the window must be at least 1 day, got {window_days}")
@@ -220,6 +289,13 @@ def check_workspace(
         for g in ws.goals
         if g.due is not None and g.due < run_date
     ]
+    # One day of slack, as for [today]: an item added in the evening may carry tomorrow's date.
+    warnings += [
+        f"[[p2]] {i.title!r} added {i.added.isoformat()} is after the run date "
+        f"{run_date.isoformat()}; check the date"
+        for i in ws.p2
+        if (i.added - run_date).days > 1
+    ]
     coverage = None
     plans: list[DayPlan] | None = None
     if ws.history:
@@ -236,19 +312,46 @@ def check_workspace(
     due = None
     if any(g.due is not None for g in ws.goals):
         due = due_soon(ws.goals, run_date, due_within_days, plans, window_days)
+    p2_review = (
+        review_p2(ws.p2, run_date, max_age_days, departures_per_month, matrix) if ws.p2 else None
+    )
+    if p2_review is not None and departures_per_month is not None:
+        warnings += _wait_warning(
+            len(ws.p2), departures_per_month, p2_review.expected_wait_months, max_age_days
+        )
     return WorkspaceReport(
         run_date=run_date,
         goal_tree_errors=tuple(check_goal_tree(ws.goals)),
         annual_count=sum(g.horizon == "annual" for g in ws.goals),
         quarterly_count=sum(g.horizon == "quarterly" for g in ws.goals),
         today=check_day_plan(ws.today, ws.goals, count) if ws.today is not None else None,
-        p2_review=(
-            review_p2(ws.p2, run_date, max_age_days, departures_per_month, matrix)
-            if ws.p2
-            else None
-        ),
+        p2_review=p2_review,
         warnings=tuple(warnings),
         coverage=coverage,
         due_soon=due,
         today_confirmed=ws.today_confirmed,
     )
+
+
+DAYS_PER_MONTH = 365.25 / 12
+
+
+def _wait_warning(
+    size: int, departures_per_month: float, wait_months: float | None, max_age_days: int
+) -> list[str]:
+    """Warn when items wait longer than the review age, so most are deleted before they are done.
+
+    By Little's law a list that clears within ``max_age_days`` holds about departures times that
+    span, rounded down, which is the size the warning names.
+    """
+    if wait_months is None or wait_months <= max_age_days / DAYS_PER_MONTH:
+        return []
+    # Round down: a list cut to this size clears within the review age, so the warning stops.
+    fits = math.floor(departures_per_month * max_age_days / DAYS_PER_MONTH)
+    holds = f"at most {fits} item{'' if fits == 1 else 's'}" if fits >= 1 else "less than one item"
+    items = f"{size} item{'' if size == 1 else 's'}"
+    rate = f"{departures_per_month:g} departure{'' if departures_per_month == 1 else 's'}"
+    return [
+        f"P2 list: {items} at {rate} a month is a {wait_months:.1f}-month wait, longer than the "
+        f"{max_age_days}-day review age; a list that clears in that time holds {holds}"
+    ]

@@ -1,3 +1,6 @@
+import json
+import re
+import tomllib
 from datetime import date, datetime
 from pathlib import Path
 
@@ -8,6 +11,7 @@ from prioritykit import (
     DayPlan,
     Goal,
     P2Item,
+    Workspace,
     WorkspaceError,
     check_day_plan,
     check_goal_tree,
@@ -355,3 +359,173 @@ def test_workspace_rejects_bad_window_settings_whatever_the_file_holds() -> None
         check_workspace(ws, date(2026, 11, 24), due_within_days=-1)
     with pytest.raises(ValueError, match="at least 1 day"):
         check_workspace(ws, date(2026, 11, 24), window_days=0)
+
+
+def test_p2_item_needs_both_scores_or_neither() -> None:
+    d = date(2026, 1, 1)
+    with pytest.raises(ValueError, match="'half': give both importance and urgency, or neither"):
+        P2Item("half", d, importance=5)
+    with pytest.raises(ValueError, match="'high': importance must be an integer from 1 to 5"):
+        P2Item("high", d, 7, 1)
+    with pytest.raises(ValueError, match="'flag': importance must be"):
+        P2Item("flag", d, True, 1)  # type: ignore[arg-type]
+    assert P2Item("unscored", d).importance is None
+    assert P2Item("scored", d, 2, 1).urgency == 1
+
+
+@pytest.mark.parametrize(
+    ("item", "message"),
+    [
+        ({"importance": 5}, "[[p2]] 'x': give both importance and urgency, or neither"),
+        ({"importance": 7, "urgency": 1}, "[[p2]] 'x': importance must be an integer from 1 to 5"),
+        ({"importance": 3, "urgency": "2"}, "[[p2]] 'x': urgency must be an integer from 1 to 5"),
+        ({"importance": True, "urgency": 1}, "[[p2]] 'x': importance must be"),
+    ],
+)
+def test_workspace_names_the_p2_item_with_bad_scores(item: dict[str, object], message: str) -> None:
+    with pytest.raises(WorkspaceError, match=re.escape(message)):
+        workspace_from_dict({"p2": [{"title": "x", "added": "2026-01-01", **item}]})
+
+
+def test_p0_must_be_true_or_false() -> None:
+    with pytest.raises(WorkspaceError, match=re.escape("[today] goal 'T' p0: expected true")):
+        workspace_from_dict({"today": {"goals": [{"title": "T", "p0": "false"}]}})
+    ws = workspace_from_dict({"today": {"goals": [{"title": "T", "p0": False}]}})
+    assert ws.today is not None and ws.today[0].p0 is False
+
+
+def test_outcomes_are_validated_and_counted() -> None:
+    with pytest.raises(ValueError, match="daily goal 'T': done must be one of"):
+        DailyGoal("T", "mentor", done="yes")  # type: ignore[arg-type]
+    with pytest.raises(
+        WorkspaceError, match=re.escape("[[day]] 2026-11-23: daily goal 'T': done must be")
+    ):
+        workspace_from_dict({"day": [{"date": "2026-11-23", "goals": [{"title": "T", "done": 1}]}]})
+
+    def day(d: int, *outcomes: str | None, confirmed: bool = True) -> DayPlan:
+        return DayPlan(
+            date(2026, 11, d),
+            tuple(DailyGoal(f"T{k}", "mentor", done=o) for k, o in enumerate(outcomes)),  # type: ignore[arg-type]
+            confirmed,
+        )
+
+    days = [
+        day(21, "done", "done", "missed"),
+        day(22, "partial", None, None),
+        day(23, "done", "done", "done", confirmed=False),  # a proposal: not counted
+        day(24, "missed", None, None),  # the run date: only recorded outcomes count
+        day(17, "done", "done", "done"),  # outside the 7-day window
+    ]
+    cov = slot_coverage(GOALS, days, date(2026, 11, 24))
+    assert (cov.done, cov.partial, cov.missed, cov.not_recorded) == (2, 1, 2, 2)
+    assert cov.to_dict()["outcomes"] == {"done": 2, "partial": 1, "missed": 2, "not_recorded": 2}
+    ws = load_workspace(EXAMPLE)
+    assert ws.history[1].goals[2].done == "partial"
+
+
+def test_p2_item_added_after_the_run_date_warns() -> None:
+    ws = workspace_from_dict(
+        {
+            "p2": [
+                {"title": "typo", "added": "2027-03-01"},
+                {"title": "added last evening, dated tomorrow", "added": "2026-11-26"},
+            ]
+        }
+    )
+    report = check_workspace(ws, date(2026, 11, 25))
+    assert report.warnings == (
+        "[[p2]] 'typo' added 2027-03-01 is after the run date 2026-11-25; check the date",
+    )
+    assert report.p2_review is not None and len(report.p2_review.keep) == 2
+
+
+def test_p2_wait_longer_than_the_review_age_warns() -> None:
+    def ws(n: int) -> Workspace:
+        return workspace_from_dict(
+            {"p2": [{"title": f"item {k}", "added": "2026-11-01"} for k in range(n)]}
+        )
+
+    run = date(2026, 11, 24)
+    # 90 days is 2.96 months, and 3 departures a month clear 8.87 items in that time.
+    assert check_workspace(ws(9), run, departures_per_month=3).warnings == (
+        "P2 list: 9 items at 3 departures a month is a 3.0-month wait, longer than the 90-day "
+        "review age; a list that clears in that time holds at most 8 items",
+    )
+    assert check_workspace(ws(8), run, departures_per_month=3).warnings == ()  # the named size
+    one = check_workspace(ws(1), run, departures_per_month=0.1, max_age_days=30)
+    assert one.warnings == (
+        "P2 list: 1 item at 0.1 departures a month is a 10.0-month wait, longer than the 30-day "
+        "review age; a list that clears in that time holds less than one item",
+    )
+    assert check_workspace(ws(30), run).warnings == ()  # no departures, no estimate
+    with pytest.raises(ValueError, match="finite"):
+        check_workspace(ws(3), run, departures_per_month=float("nan"))
+
+
+def test_json_null_reads_as_absent_and_ids_may_be_numbers() -> None:
+    ws = workspace_from_dict(
+        {
+            "goal": [
+                {"id": 1, "title": "A", "horizon": "annual", "parent": None, "due": None},
+                {"id": 2, "title": "Q", "horizon": "quarterly", "parent": 1},
+            ],
+            "today": {
+                "date": None,
+                "confirmed": None,
+                "goals": [{"title": "T", "parent": 2, "p0": None, "displaces": None}],
+            },
+            "day": [{"date": "2026-11-23", "confirmed": None, "goals": None}],
+            "p2": [{"title": "x", "added": "2026-11-01", "importance": None, "confirmed": None}],
+        }
+    )
+    assert check_goal_tree(ws.goals) == []
+    assert ws.today is not None and ws.today[0].parent == "2" and ws.today_date is None
+    assert ws.today_confirmed is True and ws.history[0].confirmed is True
+    assert ws.p2[0].importance is None and ws.p2[0].confirmed is True
+
+
+@pytest.mark.parametrize(
+    ("data", "message"),
+    [
+        (
+            {"today": {"goals": [{"title": "F", "p0": True, "displaces": 5}]}},
+            "[today] goal 'F' displaces: expected text, got 5",
+        ),
+        ({"today": {"goals": [{"title": "T", "parent": ["q"]}]}}, "parent: expected an id"),
+        ({"goal": [{"id": "q", "title": "Q", "horizon": "quarterly", "parent": True}]}, "an id"),
+        ({"goal": [{"id": {"x": 1}, "title": "A", "horizon": "annual"}]}, "[[goal]] id"),
+        ({"today": {"goals": [{"title": None}]}}, "needs a title; missing 'title'"),
+        ({"today": {"goals": [{"title": 5}]}}, "a goal title in [today]: expected text, got 5"),
+        ({"p2": [{"title": ["x"], "added": "2026-11-01"}]}, "[[p2]] title: expected text"),
+    ],
+)
+def test_wrong_types_are_workspace_errors(data: dict[str, object], message: str) -> None:
+    with pytest.raises(WorkspaceError, match=re.escape(message)):
+        workspace_from_dict(data)
+
+
+def test_json_file_matches_toml(tmp_path: Path) -> None:
+    data = tomllib.loads(EXAMPLE.read_text(encoding="utf-8"))
+    path = tmp_path / "priorities.json"
+    path.write_text(json.dumps(data, default=str))  # dates become "2026-11-24" strings
+    run = date(2026, 11, 24)
+    as_json = check_workspace(load_workspace(path), run, departures_per_month=3).to_dict()
+    as_toml = check_workspace(load_workspace(EXAMPLE), run, departures_per_month=3).to_dict()
+    assert as_json == as_toml
+
+
+@pytest.mark.parametrize(
+    ("text", "message"),
+    [
+        ("{not json", "priorities.json: "),
+        ("[1, 2]", "the top level must be an object"),
+        ('{"goal": {"id": "a"}}', "[[goal]] must be a list of tables"),
+        ('{"today": []}', "[today] must be a table"),
+        ('{"day": [{"date": "2026-11-23", "goals": "T"}]}', "goals in [[day]] 2026-11-23 must"),
+    ],
+)
+def test_malformed_json_is_a_workspace_error(tmp_path: Path, text: str, message: str) -> None:
+    path = tmp_path / "priorities.json"
+    path.write_text(text)
+    with pytest.raises(WorkspaceError, match=re.escape(message)):
+        load_workspace(path)

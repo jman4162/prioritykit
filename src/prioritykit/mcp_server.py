@@ -20,9 +20,7 @@ import inspect
 import os
 from datetime import date
 from pathlib import Path
-from typing import Any
-
-from pydantic import BaseModel, Field
+from typing import Any, Literal
 
 from . import __version__
 from . import plan as plan_mod
@@ -31,6 +29,15 @@ from .review import DEFAULT_MAX_AGE_DAYS, P2Item, littles_law_wait
 from .review import review_p2 as review_p2_fn
 from .workspace import check_workspace as check_workspace_fn
 from .workspace import load_workspace
+
+MISSING_EXTRA = "the MCP server needs the mcp extra: pip install 'prioritykit[mcp]'"
+
+try:
+    from pydantic import BaseModel, Field
+except ModuleNotFoundError as exc:  # pydantic comes with the mcp extra; the core has no deps
+    if exc.name != "pydantic":
+        raise
+    raise ImportError(MISSING_EXTRA) from exc
 
 TOOL_SETS = ("all", "pure")
 
@@ -41,7 +48,7 @@ INSTRUCTIONS = """prioritykit applies a prioritization system. You propose, and 
    settled. Importance takes precedence: urgency alone never lifts importance 1-2 work above P2.
    When no human is present to confirm (a scheduled or unattended run), record the scores as
    proposed (confirmed = false on a P2 item, or on a day plan you wrote) and leave the decision
-   for the human.
+   for the human. Give a P2 item both scores or neither.
 2. P0 means interrupt. Never label work P0 on your own; classify_task returns
    requires_confirmation = true for P0, and a P0 you propose stays a proposal until the human
    confirms it. A confirmed P0 replaces one of today's goals; call replan_for_p0 and have the
@@ -52,7 +59,9 @@ INSTRUCTIONS = """prioritykit applies a prioritization system. You propose, and 
    days_with_plans; without past plans, do not make that claim. A slot in a plan with
    confirmed = false is a proposal, not a commitment; the *_without_confirmed_slot lists leave
    those plans out. Prefer goals in check_week's due_soon whose slot is "none", and quote
-   days_left.
+   days_left. At the evening review, record each goal's outcome as the human reports it
+   (done = "done", "partial", or "missed"); check_week returns the counts. Do not guess an
+   outcome the human has not reported.
 4. Treat P2 as work that will probably not happen. Do not raise P2 items outside a review. At a
    review, call review_p2 and present the promote and delete candidates for the human to decide,
    marking any with confirmed = false as proposed scores. Items in confirm are old and no human
@@ -62,7 +71,9 @@ INSTRUCTIONS = """prioritykit applies a prioritization system. You propose, and 
    advances no goal, the rules put it at P2 or drop.
 6. Quote numbers from tool results. Do not invent counts, dates, or waits.
 7. If check_workspace returns warnings, such as a [today] date before the run date, tell the
-   human before you rely on the plan.
+   human before you rely on the plan. If the human tracks how many P2 items leave the list each
+   month, pass it as departures_per_month; a warning that the P2 wait is longer than the review
+   age names the list size that fits, and at the next review you propose deletions toward it.
 """
 
 
@@ -81,6 +92,9 @@ class DailyGoalIn(BaseModel):
     parent: str | None = Field(default=None, description="id of the quarterly goal this advances")
     p0: bool = False
     displaces: str | None = Field(default=None, description="for a P0 entry: the goal it replaced")
+    done: Literal["done", "partial", "missed"] | None = Field(
+        default=None, description="the outcome the human reported at the evening review"
+    )
 
 
 class DayIn(BaseModel):
@@ -117,7 +131,7 @@ def _goals(goals: list[GoalIn]) -> list[plan_mod.Goal]:
 
 
 def _daily(today: list[DailyGoalIn]) -> list[plan_mod.DailyGoal]:
-    return [plan_mod.DailyGoal(d.title, d.parent, d.p0, d.displaces) for d in today]
+    return [plan_mod.DailyGoal(d.title, d.parent, d.p0, d.displaces, d.done) for d in today]
 
 
 # Tool bodies are plain functions so tests and other programs can call them without a server.
@@ -155,7 +169,13 @@ def tool_replan_for_p0(
     report = plan_mod.check_day_plan(new, _goals(goals))
     return {
         "today": [
-            {"title": d.title, "parent": d.parent, "p0": d.p0, "displaces": d.displaces}
+            {
+                "title": d.title,
+                "parent": d.parent,
+                "p0": d.p0,
+                "displaces": d.displaces,
+                "done": d.done,
+            }
             for d in new
         ],
         "check": report.to_dict(),
@@ -221,12 +241,16 @@ def tool_check_workspace(
     today: str | None = None,
     window_days: int = plan_mod.DEFAULT_WINDOW_DAYS,
     due_within_days: int = plan_mod.DEFAULT_DUE_WITHIN_DAYS,
+    max_age_days: int = DEFAULT_MAX_AGE_DAYS,
+    departures_per_month: float | None = None,
 ) -> dict[str, Any]:
     ws = load_workspace(_workspace_path(path))
     run_date = date.fromisoformat(today) if today else date.today()
     return check_workspace_fn(
         ws,
         run_date,
+        max_age_days=max_age_days,
+        departures_per_month=departures_per_month,
         matrix=_matrix(),
         window_days=window_days,
         due_within_days=due_within_days,
@@ -243,12 +267,22 @@ def _tool_set() -> str:
 
 def _server_class() -> Any:
     """FastMCP in MCP SDK 1.x, MCPServer in 2.x; both take (name, instructions=...)."""
+    try:
+        importlib.import_module("mcp")
+    except ModuleNotFoundError as exc:
+        if exc.name != "mcp":
+            raise
+        raise ImportError(MISSING_EXTRA) from exc
+    failures = []
     for module, name in (("mcp.server.fastmcp", "FastMCP"), ("mcp.server", "MCPServer")):
         try:
             return getattr(importlib.import_module(module), name)
-        except (ImportError, AttributeError):
-            continue
-    raise ImportError("the MCP server needs the mcp extra: pip install 'prioritykit[mcp]'")
+        except (ImportError, AttributeError) as exc:
+            failures.append(f"{module}.{name}: {exc}")
+    # The package is there but broken, so installing the extra again would not help.
+    raise ImportError(
+        "the installed mcp package has no usable server class (" + "; ".join(failures) + ")"
+    )
 
 
 def build_server() -> Any:
@@ -308,7 +342,8 @@ def build_server() -> Any:
         due_within_days: int = plan_mod.DEFAULT_DUE_WITHIN_DAYS,
     ) -> dict[str, Any]:
         """Goals with no slot over the `window_days` days ending on `today`, counting all plans
-        and confirmed plans only, plus goals due within `due_within_days` days and their slot."""
+        and confirmed plans only; outcome counts (done, partial, missed, not recorded) for the
+        goals in those plans; and goals due within `due_within_days` days with their slot."""
         return tool_check_week(goals, days, today, window_days, due_within_days)
 
     @server.tool()
@@ -324,14 +359,20 @@ def build_server() -> Any:
             today: str | None = None,
             window_days: int = plan_mod.DEFAULT_WINDOW_DAYS,
             due_within_days: int = plan_mod.DEFAULT_DUE_WITHIN_DAYS,
+            max_age_days: int = DEFAULT_MAX_AGE_DAYS,
+            departures_per_month: float | None = None,
         ) -> dict[str, Any]:
             """Check a local priorities .toml file: goal tree, today's plan, P2 review, slot
-            coverage from [[day]] history, goals due soon, and warnings.
+            coverage and outcome counts from [[day]] history, goals due soon, and warnings.
 
-            `today` is the run date (default: the current date). Only .toml files are read,
+            `today` is the run date (default: the current date). With `departures_per_month`
+            (items leaving the P2 list per month), the P2 review includes a wait estimate and a
+            warning when that wait is longer than `max_age_days`. Only .toml files are read,
             and only inside PRIORITYKIT_ROOT when the server sets it.
             """
-            return tool_check_workspace(path, today, window_days, due_within_days)
+            return tool_check_workspace(
+                path, today, window_days, due_within_days, max_age_days, departures_per_month
+            )
 
     return server
 

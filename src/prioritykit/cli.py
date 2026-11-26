@@ -153,6 +153,11 @@ def cmd_check(args: argparse.Namespace) -> int:
                 )
         if not (cov.quarterly_without_confirmed_slot or cov.annual_without_confirmed_slot):
             lines.append("  every goal had a slot")
+        if cov.done or cov.partial or cov.missed:
+            lines.append(
+                f"  outcomes: {cov.done} done, {cov.partial} partial, {cov.missed} missed, "
+                f"{cov.not_recorded} not recorded"
+            )
 
     if report.due_soon:
         lines.append(f"due within {args.due_within} days:")
@@ -249,15 +254,25 @@ def build_parser() -> argparse.ArgumentParser:
     k.set_defaults(func=cmd_check)
 
     s = sub.add_parser("mcp", help="run the stdio MCP server (needs the mcp extra)")
-    s.set_defaults(func=lambda _args: _run_mcp())
+    s.set_defaults(func=lambda _args: _serve_mcp())
     return p
 
 
-def _run_mcp() -> int:
-    from .mcp_server import main as mcp_main
+def _serve_mcp() -> int:
+    """Run the MCP server; without the mcp extra, say how to install it instead of a traceback."""
+    try:
+        from .mcp_server import main as mcp_main
 
-    mcp_main()
+        mcp_main()  # the server class is imported here, so a missing mcp package fails here too
+    except ImportError as exc:
+        print(f"prioritykit: {exc}", file=sys.stderr)
+        return 2
     return 0
+
+
+def run_mcp() -> int:
+    """The ``prioritykit-mcp`` script: the same as ``prioritykit mcp``, with the same errors."""
+    return main(["mcp"])
 
 
 def main(argv: Sequence[str] | None = None) -> int:

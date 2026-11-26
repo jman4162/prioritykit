@@ -7,17 +7,19 @@ that still score P2 or lower, or were never scored, are deletion candidates; the
 Each entry carries ``confirmed``, so an agent's proposed scores reach the review marked as such.
 An old item with ``confirmed=False`` (an agent added or scored it, and no person has confirmed)
 goes to ``confirm`` instead of ``delete``: a person scores it or deletes it, so a batch approval
-of the delete list never removes an item nobody looked at.
+of the delete list never removes an item nobody looked at. An item has both scores or neither; a
+lone score raises ``ValueError`` rather than counting as unscored.
 """
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date
 from typing import Any
 
-from .matrix import RANK, Classification, Matrix, classify
+from .matrix import RANK, Classification, Matrix, _require_score, classify
 
 DEFAULT_MAX_AGE_DAYS = 90  # one quarter; change it to match your review cadence
 
@@ -29,6 +31,16 @@ class P2Item:
     importance: int | None = None
     urgency: int | None = None
     confirmed: bool = True  # False: an agent proposed the scores and the person has not confirmed
+
+    def __post_init__(self) -> None:
+        if (self.importance is None) != (self.urgency is None):
+            raise ValueError(f"{self.title!r}: give both importance and urgency, or neither")
+        try:
+            if self.importance is not None:
+                _require_score("importance", self.importance)
+                _require_score("urgency", self.urgency)
+        except ValueError as exc:
+            raise ValueError(f"{self.title!r}: {exc}") from None
 
 
 @dataclass(frozen=True)
@@ -69,6 +81,8 @@ def littles_law_wait(backlog: int, departures_per_period: float) -> float:
     """
     if backlog < 0:
         raise ValueError("backlog cannot be negative")
+    if not math.isfinite(departures_per_period):
+        raise ValueError(f"departures must be a finite number, got {departures_per_period}")
     if departures_per_period <= 0:
         raise ValueError("departures must be positive; a list nothing leaves never clears")
     return backlog / departures_per_period

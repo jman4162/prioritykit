@@ -82,8 +82,12 @@ Every command takes `--json`. `check` exits with status 1 when the goal tree or 
 breaks a rule, so it can run in a pre-commit hook or a scheduled job. It counts P2 ages from the
 run date, which is the current date unless you pass `--today`, and warns when `[today]` is dated
 before the run date; `--strict` exits 1 on warnings too. It lists goals due within 28 days of the
-run date (`--due-within`) as information, not as warnings. `python -m prioritykit` runs the same
-CLI when the console script is not on your PATH. Output for the example:
+run date (`--due-within`) as information, not as warnings. `--departures` is how many items leave
+the P2 list in a month, done or deleted. With it, `check` estimates how long a new item waits
+(Little's law: list length divided by departures), and warns when that wait is longer than the
+review age (`--max-age`, 90 days by default), naming the list size that clears in that time.
+`python -m prioritykit` runs the same CLI when the console script is not on your PATH. Output for
+the example:
 
 ```text
 goal tree: ok (4 annual, 4 quarterly)
@@ -95,6 +99,7 @@ today (3 goals): ok
 last 7 days (2026-11-18 to 2026-11-24): plans on 3 days (1 proposed)
   quarterly goals slotted only in proposed plans: One post a month
   annual goals slotted only in proposed plans: Publish technical writing
+  outcomes: 2 done, 1 partial, 0 missed, 0 not recorded
 due within 28 days:
   Mentor a junior scientist (due 2026-12-18, 24 days left; slotted in a confirmed plan)
 P2 list: 3 items
@@ -131,14 +136,14 @@ date = 2026-11-23
 confirmed = false   # optional, here or on [today]; an agent proposed this plan, you have not confirmed
 goals = [
   { title = "Pair on the eval harness with a teammate", parent = "mentor" },
-  # ...
+  # ... at the evening review, add done = "done", "partial", or "missed" to each goal
 ]
 
 [[p2]]
 title = "Renew the passport before the spring trip"
 added = 2026-10-01
-importance = 4   # optional; rescored items that now map to P1 or P0 are promotion candidates
-urgency = 3
+importance = 4   # optional, both scores or neither; an item that now maps to P1 or P0
+urgency = 3      # is a promotion candidate
 confirmed = false   # optional; an agent added or scored it and you have not confirmed
 ```
 
@@ -146,6 +151,9 @@ confirmed = false   # optional; an agent added or scored it and you have not con
 90 days that still scores P2 or lower, or was never scored, is a deletion candidate; change the
 threshold with `--max-age`. An old item marked `confirmed = false` goes on a separate "confirm or
 delete" list instead, so approving the delete list never removes an item nobody has looked at.
+Loading is strict, and each error names the item: a P2 item has both scores or neither, each an
+integer from 1 to 5, and `p0` and `confirmed` take `true` or `false`. A P2 item dated more than a
+day after the run date is a warning, since it is probably a typo.
 
 With `[[day]]` history, `check` lists the quarterly and annual goals that no plan gave a slot in
 the last 7 days (`--window`), counting `[today]`, and says how many of those days had a plan. A
@@ -155,8 +163,19 @@ ones), and the text output names the goals slotted only in proposals. `[today]` 
 `confirmed = false` prints as proposed and carries `"confirmed": false` in the JSON. Each goal in
 `due_soon` carries `days_left` and `slot`: `"confirmed"`, `"proposed"`, or `"none"`, judged from
 the last 7 days of plans plus any later plan such as tomorrow's `[today]`, or `null` when there
-is no plan to judge by. Keep one plan per date. A `[[day]]` with the same date as `[today]` is ignored, with a warning, and
-two `[[day]]` entries with one date are an error.
+is no plan to judge by. Keep one plan per date. A `[[day]]` with the same date as `[today]` is
+ignored, with a warning, and two `[[day]]` entries with one date are an error.
+
+A goal's `done` field records how it went: `"done"`, `"partial"`, or `"missed"`. With `[[day]]`
+history, `check` counts the outcomes in the confirmed plans of the same window (`outcomes` in the
+JSON) and prints the counts once any are recorded. `not_recorded` counts goals with no outcome,
+except those planned for the run date, whose evening has not come yet. The package reports the
+counts and leaves the judgment to you, such as whether a week with every goal done means the
+goals were too easy.
+
+A file whose name ends in `.json` is read as JSON with the same layout, for scripts that write
+the file. Dates are strings (`"2026-11-24"`), `null` reads as a missing field, and ids may be
+whole numbers. The MCP `check_workspace` tool reads only `.toml` files.
 
 Goal titles can name employer-internal projects or private matters, so keep your priorities file
 in a private repository, not a public one.
@@ -171,10 +190,10 @@ The server speaks stdio and exposes eight tools. All but `check_workspace` are p
 | `classify_task` | the level and action for an importance and urgency pair, and `requires_confirmation` (true for P0) |
 | `check_day_plan` | whether today holds exactly three goals, each traced to quarterly and annual goals |
 | `replan_for_p0` | today's plan with one goal replaced by a confirmed P0, rechecked |
-| `check_week` | goals no day plan gave a slot over the last N days, counting all plans and confirmed plans only, how many days had a plan, and goals due soon with their slot |
+| `check_week` | goals no day plan gave a slot over the last N days, counting all plans and confirmed plans only, how many days had a plan, outcome counts, and goals due soon with their slot |
 | `review_p2` | promote, delete, confirm, and keep lists for a P2 review |
 | `wait_estimate` | expected months on a list, by Little's law |
-| `check_workspace` | all of the above for a local `priorities.toml`, plus warnings such as a stale `[today]` date |
+| `check_workspace` | all of the above for a local `priorities.toml`, plus warnings such as a stale `[today]` date or, given `departures_per_month`, a P2 wait longer than the review age |
 
 Claude Code:
 
@@ -192,7 +211,8 @@ The server's instructions tell the agent to propose scores with a reason for eac
 the human to confirm, or record them as proposed (`confirmed = false`) when no human is present;
 never to label work P0 on its own; to call `check_day_plan` before presenting a day's three goals
 and `check_week` before saying a goal has gone without a slot; to favor goals that are due soon
-and have no slot; and to raise P2 items only during a review. Work the agent
+and have no slot; to record a goal's outcome only as the human reports it; and to raise P2 items
+only during a review. Work the agent
 generates for itself is scored like any other task. The same protocol is written out as an agent
 skill in [`skills/prioritykit/SKILL.md`](https://github.com/jman4162/prioritykit/blob/main/skills/prioritykit/SKILL.md); copy it into
 `~/.claude/skills/` or adapt it for an `AGENTS.md` file.

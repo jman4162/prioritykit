@@ -19,6 +19,7 @@ tools, so the result is the same every time. If the MCP server is not connected,
 4. Ask the person to confirm or change the scores before you act on the level. If the person is
    not there to confirm (a scheduled or unattended run), record the scores as proposed
    (`confirmed = false` on a P2 item, or on a day plan you wrote) and leave the decision to them.
+   Give a P2 item both scores or neither.
 
 Importance takes precedence. Urgency alone never lifts work of importance 1 or 2 above P2, so
 do not argue a low-importance task up the list because its deadline is close.
@@ -47,6 +48,14 @@ plan.
 5. When choosing the three, favor goals in `due_soon` whose `slot` is `"none"`, and quote
    `days_left`.
 
+## Each evening
+
+Ask the person how each of the day's three goals went, and record `done = "done"`, `"partial"`,
+or `"missed"` on each goal as they report it. Do not guess an outcome they have not given.
+`check_week` returns the counts for the window, and so does `check_workspace` once the file has
+`[[day]]` history; only confirmed plans count. If nearly every goal is done week after week, ask
+whether the goals are too easy; the person decides.
+
 ## Small, piled-up, and fun work
 
 - A task that takes a few minutes: suggest doing it when it arrives instead of scoring and listing it.
@@ -60,9 +69,12 @@ Treat P2 as work that will probably not happen. Do not bring up P2 items during 
 At the person's periodic review, call `review_p2`, present the promote and delete candidates, and
 let the person decide each one, marking items with `confirmed = false` as proposed scores. Items
 in `confirm` are old and the person never confirmed them (`confirmed = false`): ask the person to
-score or delete each one. A promoted item needs a dated slot in an upcoming day's three. A P2 item that blocks P1 work takes
-on that work's importance; rescore it instead of waiting for it to age. At the weekly review,
-call `check_week` to list the quarterly goals that got no slot.
+score or delete each one. A promoted item needs a dated slot in an upcoming day's three. A P2
+item that blocks P1 work takes on that work's importance; rescore it instead of waiting for it to
+age. If the person tracks how many items leave the P2 list each month, pass it to
+`check_workspace` as `departures_per_month`; when it warns that the P2 wait is longer than the
+review age, propose deletions toward the list size it names. At the weekly review, call
+`check_week` to list the quarterly goals that got no slot.
 
 ## Work you generate
 

@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.5.0 (2026-11-25)
+
+- Optional `done = "done"`, `"partial"`, or `"missed"` on each daily goal records its outcome at
+  the evening review. Coverage adds `outcomes` counts over the window's confirmed plans, with
+  `not_recorded` for goals that have none (not counting the run date's own plan), and `check`
+  prints them once any outcome is recorded. `check_week` accepts `done` and returns the counts.
+- With `--departures`, `check` warns when the P2 list's Little's-law wait is longer than the
+  review age (`--max-age`) and names the largest list that clears in that time. The MCP
+  `check_workspace` tool takes `departures_per_month` and `max_age_days` for the same check.
+- A P2 item whose `added` date is more than a day after the run date is a warning.
+- `check` and `load_workspace` read a `.json` file with the same layout as the TOML file: dates
+  as strings, `null` read as a missing field, ids as text or whole numbers. The MCP
+  `check_workspace` tool still reads only `.toml` files.
+- `prioritykit mcp` and `prioritykit-mcp` without the mcp extra print how to install it and exit
+  2, instead of a traceback. `prioritykit-mcp` now runs through the CLI, so its other startup
+  errors print one line as well. When the mcp package is installed but broken, the error says so
+  instead of asking for the extra again.
+- `--departures` must be a finite number.
+- Python 3.14 in the classifiers and the CI matrix; a changelog link on the PyPI page; the README
+  explains `--departures`.
+- Behavior change: a P2 item with one score, or a score that is not an integer from 1 to 5, is an
+  error that names the item. Before, a lone score counted as no score, so an old item could land
+  on the delete list. `P2Item` checks this itself, so the library and MCP tools reject it too.
+- Behavior change: `p0` must be `true` or `false`; `p0 = "false"` used to count as a P0. Titles
+  and `displaces` must be text, and ids and `parent` text or whole numbers. A value of the wrong
+  type or a table of the wrong shape is an error instead of a crash or a goal titled "None".
+- The new warnings make `--strict` exit 1.
+
 ## 0.4.0 (2026-11-25)
 
 - Optional `confirmed = false` on `[[day]]` and `[today]` marks a plan an agent proposed. Coverage
